@@ -12,78 +12,102 @@
 <body>
   <header class="header">
     <h1>ClariTrans</h1>
-    <p class="sub">Clientseitige Web-App zum schnellen Transponieren von Klarinetten-Stimmen (ABC + Live-Rendering).</p>
+    <p class="sub">Transponiere Klarinetten-Stimmen über Vorzeichen, Instrument & Notenfeld.</p>
   </header>
 
-  <main class="grid">
-    <section class="card">
-      <h2>1) Vorzeichen</h2>
+  <main class="layout">
+    <section class="sidebar">
+      <div class="card">
+        <h2>1) Vorzeichen</h2>
 
-      <div class="row">
-        <label>Typ</label>
-        <div class="seg">
-          <button id="accTypeSharps" class="segbtn active" type="button">Kreuze ♯</button>
-          <button id="accTypeFlats" class="segbtn" type="button">B’s ♭</button>
+        <div class="row">
+          <label>Typ</label>
+          <div class="seg">
+            <button id="accTypeSharps" class="segbtn active" type="button">Kreuze ♯</button>
+            <button id="accTypeFlats" class="segbtn" type="button">B’s ♭</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label for="accCount">Anzahl</label>
+          <select id="accCount">
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label>Modus</label>
+          <div class="seg">
+            <button id="modeMajor" class="segbtn active" type="button">Dur</button>
+            <button id="modeMinor" class="segbtn" type="button">Moll</button>
+          </div>
+        </div>
+
+        <div class="badge-row">
+          <div class="badge">
+            <span class="badge-label">Original</span>
+            <span id="origKeyLabel" class="badge-value">C-Dur</span>
+          </div>
+        </div>
+
+        <div class="note">Originaltonart: <span id="origKeyText">C-Dur</span></div>
+      </div>
+
+      <div class="card">
+        <h2>2) Instrument</h2>
+
+        <div class="row">
+          <label for="instrument">Klarinetten-Typ</label>
+          <select id="instrument">
+            <option value="Bb">B-Klarinette (in B♭)</option>
+            <option value="A">A-Klarinette (in A)</option>
+            <option value="Eb">Es-Klarinette (in E♭)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="meter">Taktart</label>
+          <select id="meter">
+            <option value="4/4">4/4</option>
+            <option value="3/4">3/4</option>
+            <option value="2/4">2/4</option>
+            <option value="6/8">6/8</option>
+            <option value="12/8">12/8</option>
+          </select>
+        </div>
+
+        <div class="badge-row">
+          <div class="badge accent">
+            <span class="badge-label">Notierte Tonart</span>
+            <span id="targetKeyLabel" class="badge-value">C-Dur</span>
+          </div>
+        </div>
+
+        <div class="note">
+          Konzertton rein, notierte Klarinetten-Tonart raus.
         </div>
       </div>
 
-      <div class="row">
-        <label for="accCount">Anzahl</label>
-        <select id="accCount">
-          <option value="0">0</option>
-          <option value="1">1</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5</option>
-          <option value="6">6</option>
-          <option value="7">7</option>
-        </select>
+      <div class="card">
+        <h2>3) Notenfeld</h2>
+        <p class="note">Rechts findest du das klickbare Notenfeld. Töne setzen, Taktstriche oder Pausen hinzufügen und als ABC kopieren.</p>
       </div>
+    </section>
 
-      <div class="row">
-        <label>Modus</label>
-        <div class="seg">
-          <button id="modeMajor" class="segbtn active" type="button">Dur</button>
-          <button id="modeMinor" class="segbtn" type="button">Moll</button>
+    <section class="workspace card">
+      <div class="workspace-head">
+        <div>
+          <h2>Notenfeld & Vorschau</h2>
+          <div class="note">Ton auswählen, Oktave und Dauer setzen, dann auf die Notenfläche klicken.</div>
         </div>
       </div>
-
-      <div class="note">
-        Tonart wird aus den Vorzeichen automatisch bestimmt.
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>2) Taktart & Instrument</h2>
-
-      <div class="row">
-        <label for="meter">Taktart</label>
-        <select id="meter">
-          <option value="4/4">4/4</option>
-          <option value="3/4">3/4</option>
-          <option value="2/4">2/4</option>
-          <option value="6/8">6/8</option>
-          <option value="12/8">12/8</option>
-        </select>
-      </div>
-
-      <div class="row">
-        <label for="instrument">Instrument</label>
-        <select id="instrument">
-          <option value="Bb">B-Klarinette (in B♭)</option>
-          <option value="A">A-Klarinette (in A)</option>
-          <option value="Eb">Es-Klarinette (in E♭)</option>
-        </select>
-      </div>
-
-      <div class="note">
-        Eingabe wird als <b>Konzertton</b> behandelt; Ausgabe ist die <b>notierte</b> Klarinettenstimme.
-      </div>
-    </section>
-
-    <section class="card wide">
-      <h2>3) Noten setzen</h2>
 
       <div class="toolrow">
         <div class="toolgroup">
@@ -125,13 +149,6 @@
 
       <div class="split">
         <div class="panel">
-          <h3>ABC (kopierbar)</h3>
-          <textarea id="abcOut" spellcheck="false" readonly></textarea>
-          <button id="copy" class="btn" type="button">ABC kopieren</button>
-          <div id="copyStatus" class="small"></div>
-        </div>
-
-        <div class="panel">
           <h3>Vorschau (abcjs)</h3>
           <div id="paper" class="paper"></div>
           <div id="renderStatus" class="small"></div>
@@ -139,9 +156,5 @@
       </div>
     </section>
   </main>
-
-  <footer class="footer">
-    <span>MVP • rein statisch • läuft auf GitHub Pages</span>
-  </footer>
 </body>
 </html>

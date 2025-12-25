@@ -8,6 +8,24 @@
   var KEYS_MINOR_SHARPS = ["Am", "Em", "Bm", "F#m", "C#m", "G#m", "D#m", "A#m"];
   var KEYS_MINOR_FLATS  = ["Am", "Dm", "Gm", "Cm", "Fm", "Bbm", "Ebm", "Abm"];
 
+  var KEY_PC = {
+    C:0, "B#":0,
+    "C#":1, Db:1,
+    D:2,
+    "D#":3, Eb:3,
+    E:4, Fb:4,
+    F:5, "E#":5,
+    "F#":6, Gb:6,
+    G:7,
+    "G#":8, Ab:8,
+    A:9,
+    "A#":10, Bb:10,
+    B:11, Cb:11
+  };
+
+  var KEY_NAMES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  var KEY_NAMES_FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","Cb"];
+
   // Prefer sharps for sharp keys, flats for flat keys; C/Am default to sharps.
   function prefersSharps(accType, accCount) {
     if (accType === "flats" && accCount > 0) return false;
@@ -19,6 +37,25 @@
     var isMajor = mode === "major";
     if (accType === "sharps") return isMajor ? KEYS_MAJOR_SHARPS[n] : KEYS_MINOR_SHARPS[n];
     return isMajor ? KEYS_MAJOR_FLATS[n] : KEYS_MINOR_FLATS[n];
+  }
+
+  function keyToPc(keyName) {
+    var root = keyName && keyName.endsWith("m") ? keyName.slice(0, -1) : keyName;
+    if (root && KEY_PC.hasOwnProperty(root)) return KEY_PC[root];
+    return 0;
+  }
+
+  function pcToKeyName(pc, isMinor, preferSharps) {
+    var names = preferSharps ? KEY_NAMES_SHARP : KEY_NAMES_FLAT;
+    var safePc = ((pc % 12) + 12) % 12;
+    var root = names[safePc];
+    return isMinor ? root + "m" : root;
+  }
+
+  function describeKeyName(keyName) {
+    var isMinor = keyName && keyName.endsWith("m");
+    var root = isMinor ? keyName.slice(0, -1) : keyName;
+    return root + (isMinor ? "-Moll" : "-Dur");
   }
 
   // --- Instrument transposition (input = concert pitch; output = written clarinet part) ---
@@ -145,11 +182,11 @@
   var undo          = $("undo");
   var clearBtn      = $("clear");
 
-  var abcOut        = $("abcOut");
   var paper         = $("paper");
   var renderStatus  = $("renderStatus");
-  var copyBtn       = $("copy");
-  var copyStatus    = $("copyStatus");
+  var origKeyLabel  = $("origKeyLabel");
+  var origKeyText   = $("origKeyText");
+  var targetKeyLabel= $("targetKeyLabel");
 
   // Build pitch palette (C D E F G A B) + chromatic accidentals via modifiers
   // Keep it simple: diatonic buttons + accidental toggles (♯/♭/♮) applied to next note only.
@@ -244,20 +281,35 @@
     octLabel.textContent = "C" + state.octave;
   }
 
-  // --- Generate ABC ---
-  function buildAbc() {
+  function computeKeyInfo() {
     var key = keyFromSignature(state.accType, state.accCount, state.mode);
-    var useSharps = prefersSharps(state.accType, state.accCount);
-
+    var preferSharpNames = prefersSharps(state.accType, state.accCount);
     var trans = transposeSemitonesForInstrument(state.instrument);
+    var basePc = keyToPc(key);
+    var isMinor = state.mode === "minor";
+    var writtenPc = ((basePc + trans) % 12 + 12) % 12;
+
+    return {
+      baseKeyName: pcToKeyName(basePc, isMinor, preferSharpNames),
+      writtenKeyName: pcToKeyName(writtenPc, isMinor, preferSharpNames),
+      preferSharps: preferSharpNames,
+      transSemis: trans
+    };
+  }
+
+  // --- Generate ABC ---
+  function buildAbc(keyInfo) {
+    var info = keyInfo || computeKeyInfo();
+    var useSharps = info.preferSharps;
+    var trans = info.transSemis;
 
     // Header
     var abc = [];
     abc.push("X:1");
-    abc.push("T:ClariTrans MVP");
+    abc.push("T:");
     abc.push("M:" + state.meter);
     abc.push("L:1/8");
-    abc.push("K:" + key);
+    abc.push("K:" + info.writtenKeyName);
 
     // Body: transpose MIDI notes for instrument
     var body = [];
@@ -313,9 +365,13 @@
 
   // --- Sync ---
   function sync() {
+    var keyInfo = computeKeyInfo();
+    var originalName = describeKeyName(keyInfo.baseKeyName);
+    if (origKeyLabel) origKeyLabel.textContent = originalName;
+    if (origKeyText) origKeyText.textContent = originalName;
+    if (targetKeyLabel) targetKeyLabel.textContent = describeKeyName(keyInfo.writtenKeyName);
     setOctaveLabel();
-    var abc = buildAbc();
-    abcOut.value = abc;
+    var abc = buildAbc(keyInfo);
     renderAbc(abc);
   }
 
@@ -395,28 +451,6 @@
   addBar.addEventListener("click", addBarToken);
   undo.addEventListener("click", undoToken);
   clearBtn.addEventListener("click", clearTokens);
-
-  copyBtn.addEventListener("click", function () {
-    var text = abcOut.value || "";
-    copyStatus.textContent = "";
-    if (!navigator.clipboard || !navigator.clipboard.writeText) {
-      // fallback
-      abcOut.focus();
-      abcOut.select();
-      try {
-        var ok = document.execCommand("copy");
-        copyStatus.textContent = ok ? "Kopiert." : "Kopieren fehlgeschlagen.";
-      } catch (_) {
-        copyStatus.textContent = "Kopieren nicht verfügbar.";
-      }
-      return;
-    }
-    navigator.clipboard.writeText(text).then(function () {
-      copyStatus.textContent = "Kopiert.";
-    }).catch(function () {
-      copyStatus.textContent = "Kopieren fehlgeschlagen.";
-    });
-  });
 
   // Init
   buildPitchUI();
