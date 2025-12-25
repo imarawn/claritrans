@@ -1,0 +1,424 @@
+(function () {
+  "use strict";
+
+  // --- Key signature lookup (from number of sharps/flats) ---
+  // We keep a simple, deterministic mapping. Users can toggle Dur/Moll.
+  var KEYS_MAJOR_SHARPS = ["C", "G", "D", "A", "E", "B", "F#", "C#"];
+  var KEYS_MAJOR_FLATS  = ["C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"];
+  var KEYS_MINOR_SHARPS = ["Am", "Em", "Bm", "F#m", "C#m", "G#m", "D#m", "A#m"];
+  var KEYS_MINOR_FLATS  = ["Am", "Dm", "Gm", "Cm", "Fm", "Bbm", "Ebm", "Abm"];
+
+  // Prefer sharps for sharp keys, flats for flat keys; C/Am default to sharps.
+  function prefersSharps(accType, accCount) {
+    if (accType === "flats" && accCount > 0) return false;
+    return true;
+  }
+
+  function keyFromSignature(accType, accCount, mode) {
+    var n = clampInt(accCount, 0, 7);
+    var isMajor = mode === "major";
+    if (accType === "sharps") return isMajor ? KEYS_MAJOR_SHARPS[n] : KEYS_MINOR_SHARPS[n];
+    return isMajor ? KEYS_MAJOR_FLATS[n] : KEYS_MINOR_FLATS[n];
+  }
+
+  // --- Instrument transposition (input = concert pitch; output = written clarinet part) ---
+  // Bb clarinet sounds a major 2nd LOWER than written => written = concert + M2
+  // A  clarinet sounds a minor 3rd LOWER than written => written = concert + m3
+  // Eb clarinet sounds a minor 3rd HIGHER than written => written = concert - m3
+  function transposeSemitonesForInstrument(instr) {
+    if (instr === "Bb") return 2;
+    if (instr === "A") return 3;
+    if (instr === "Eb") return -3;
+    return 0;
+  }
+
+  // --- ABC helpers ---
+  // We use L:1/8 for simplicity. Durations are in "eighths".
+  function durToAbc(dur) {
+    // dur can be 1,2,4,8 or 0.5 (sixteenth)
+    if (dur === 1) return "";     // 1 * (1/8) => omit
+    if (dur === 2) return "2";    // 1/4
+    if (dur === 4) return "4";    // 1/2
+    if (dur === 8) return "8";    // whole (in 4/4)
+    if (dur === 0.5) return "/";  // 1/16
+    return "";
+  }
+
+  // Map pitch class to ABC accidental + note name with sharp/flat preference.
+  // We output explicit accidentals ( ^, _ ) for black keys.
+  function pcToAbcName(pc, useSharps) {
+    var sharpNames = ["C", "^C", "D", "^D", "E", "F", "^F", "G", "^G", "A", "^A", "B"];
+    var flatNames  = ["C", "_D", "D", "_E", "E", "F", "_G", "G", "_A", "A", "_B", "B"];
+    return (useSharps ? sharpNames : flatNames)[pc % 12];
+  }
+
+  // MIDI -> ABC note token (no duration)
+  // MIDI 60 = middle C => "C"
+  function midiToAbc(midi, useSharps) {
+    var m = Math.round(midi);
+    var pc = ((m % 12) + 12) % 12;
+    var octave = Math.floor(m / 12) - 1; // MIDI standard: 60 -> 4
+
+    var name = pcToAbcName(pc, useSharps); // includes ^ or _
+    // Base letter without accidentals, but accidental prefix stays with case changes.
+    // For octave mapping:
+    // octave 4 => uppercase (C..B)
+    // octave 5 => lowercase (c..b)
+    // >5 => lowercase + apostrophes
+    // <4 => uppercase + commas
+    var accPrefix = "";
+    var letter = name;
+
+    if (name[0] === "^" || name[0] === "_") {
+      accPrefix = name[0];
+      letter = name.slice(1);
+    }
+
+    var isLower = false;
+    var outLetter = letter;
+
+    if (octave >= 5) {
+      isLower = true;
+      outLetter = letter.toLowerCase();
+    } else {
+      outLetter = letter.toUpperCase();
+    }
+
+    var marks = "";
+    if (octave > 5) {
+      marks = repeat("'", octave - 5);
+    } else if (octave < 4) {
+      marks = repeat(",", 4 - octave);
+    }
+
+    return accPrefix + outLetter + marks;
+  }
+
+  function repeat(ch, n) {
+    var s = "";
+    for (var i = 0; i < n; i++) s += ch;
+    return s;
+  }
+
+  function clampInt(v, min, max) {
+    var x = parseInt(v, 10);
+    if (isNaN(x)) x = min;
+    if (x < min) x = min;
+    if (x > max) x = max;
+    return x;
+  }
+
+  // --- State ---
+  var state = {
+    accType: "sharps",  // "sharps" | "flats"
+    accCount: 0,
+    mode: "major",      // "major" | "minor"
+    meter: "4/4",
+    instrument: "Bb",
+    // Note entry as concert MIDI numbers + duration in eighths
+    // tokens: { kind:"note", midi:60, dur:2 } | { kind:"rest", dur:2 } | { kind:"bar" }
+    tokens: [],
+    // Octave selector: stored as octave number (MIDI octave, where 4 is middle C octave)
+    octave: 4,
+    // Selected duration (in eighths). 1=1/8, 2=1/4, 4=1/2, 8=whole, 0.5=1/16
+    dur: 1
+  };
+
+  // --- DOM ---
+  var $ = function (id) { return document.getElementById(id); };
+
+  var accTypeSharps = $("accTypeSharps");
+  var accTypeFlats  = $("accTypeFlats");
+  var accCount      = $("accCount");
+  var modeMajor     = $("modeMajor");
+  var modeMinor     = $("modeMinor");
+  var meter         = $("meter");
+  var instrument    = $("instrument");
+
+  var pitchButtons  = $("pitchButtons");
+  var octDown       = $("octDown");
+  var octUp         = $("octUp");
+  var octLabel      = $("octLabel");
+
+  var addRest       = $("addRest");
+  var addBar        = $("addBar");
+  var undo          = $("undo");
+  var clearBtn      = $("clear");
+
+  var abcOut        = $("abcOut");
+  var paper         = $("paper");
+  var renderStatus  = $("renderStatus");
+  var copyBtn       = $("copy");
+  var copyStatus    = $("copyStatus");
+
+  // Build pitch palette (C D E F G A B) + chromatic accidentals via modifiers
+  // Keep it simple: diatonic buttons + accidental toggles (♯/♭/♮) applied to next note only.
+  var accidental = 0; // -1 flat, 0 natural, +1 sharp (applied to the next pitch)
+
+  function makeButton(label, onClick, className) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = className || "btn";
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function buildPitchUI() {
+    pitchButtons.innerHTML = "";
+
+    // Accidental toggles
+    var accWrap = document.createElement("div");
+    accWrap.className = "btnwrap";
+    accWrap.appendChild(makeButton("♭", function(){ accidental = -1; setAccToggles(); }, "btn"));
+    accWrap.appendChild(makeButton("♮", function(){ accidental = 0;  setAccToggles(); }, "btn"));
+    accWrap.appendChild(makeButton("♯", function(){ accidental = 1;  setAccToggles(); }, "btn"));
+    pitchButtons.appendChild(accWrap);
+
+    // Diatonic pitches
+    var notesWrap = document.createElement("div");
+    notesWrap.className = "btnwrap";
+    var diatonic = ["C","D","E","F","G","A","B"];
+    for (var i = 0; i < diatonic.length; i++) {
+      (function (p) {
+        notesWrap.appendChild(makeButton(p, function () { addPitch(p); }, "btn"));
+      })(diatonic[i]);
+    }
+    pitchButtons.appendChild(notesWrap);
+
+    setAccToggles();
+  }
+
+  function setAccToggles() {
+    // visually mark selected accidental by outlining the corresponding button (first 3 in the first wrap)
+    var wrap = pitchButtons.firstChild;
+    if (!wrap) return;
+    var btns = wrap.querySelectorAll("button");
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].style.outline = "none";
+    }
+    var idx = (accidental === -1) ? 0 : (accidental === 0 ? 1 : 2);
+    if (btns[idx]) btns[idx].style.outline = "2px solid rgba(255,255,255,0.18)";
+  }
+
+  // Convert chosen pitch + octave + accidental to MIDI
+  function pitchToMidi(letter, octave, accidentalDelta) {
+    // Base pitch classes for C D E F G A B
+    var base = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[letter];
+    var pc = base + (accidentalDelta || 0);
+    // MIDI for C in that octave: C4=60 => formula: (octave+1)*12
+    var midi = (octave + 1) * 12 + pc;
+    return midi;
+  }
+
+  function addPitch(letter) {
+    var midi = pitchToMidi(letter, state.octave, accidental);
+    state.tokens.push({ kind: "note", midi: midi, dur: state.dur });
+    accidental = 0; // reset after placing
+    setAccToggles();
+    sync();
+  }
+
+  function addRestToken() {
+    state.tokens.push({ kind: "rest", dur: state.dur });
+    sync();
+  }
+
+  function addBarToken() {
+    state.tokens.push({ kind: "bar" });
+    sync();
+  }
+
+  function undoToken() {
+    state.tokens.pop();
+    sync();
+  }
+
+  function clearTokens() {
+    state.tokens = [];
+    sync();
+  }
+
+  function setOctaveLabel() {
+    // show as C{octave}
+    octLabel.textContent = "C" + state.octave;
+  }
+
+  // --- Generate ABC ---
+  function buildAbc() {
+    var key = keyFromSignature(state.accType, state.accCount, state.mode);
+    var useSharps = prefersSharps(state.accType, state.accCount);
+
+    var trans = transposeSemitonesForInstrument(state.instrument);
+
+    // Header
+    var abc = [];
+    abc.push("X:1");
+    abc.push("T:ClariTrans MVP");
+    abc.push("M:" + state.meter);
+    abc.push("L:1/8");
+    abc.push("K:" + key);
+
+    // Body: transpose MIDI notes for instrument
+    var body = [];
+    for (var i = 0; i < state.tokens.length; i++) {
+      var t = state.tokens[i];
+      if (t.kind === "bar") {
+        body.push("|");
+        continue;
+      }
+      if (t.kind === "rest") {
+        body.push("z" + durToAbc(t.dur));
+        continue;
+      }
+      if (t.kind === "note") {
+        var outMidi = t.midi + trans;
+        body.push(midiToAbc(outMidi, useSharps) + durToAbc(t.dur));
+        continue;
+      }
+    }
+
+    // Keep it readable: insert a line break every ~16 tokens
+    var wrapped = [];
+    var line = [];
+    for (var j = 0; j < body.length; j++) {
+      line.push(body[j]);
+      if (line.length >= 16) {
+        wrapped.push(line.join(" "));
+        line = [];
+      }
+    }
+    if (line.length) wrapped.push(line.join(" "));
+
+    abc.push(wrapped.join("\n"));
+    return abc.join("\n");
+  }
+
+  function renderAbc(abc) {
+    if (!window.ABCJS || !window.ABCJS.renderAbc) {
+      renderStatus.textContent = "abcjs noch nicht geladen (CDN).";
+      return;
+    }
+    paper.innerHTML = "";
+    renderStatus.textContent = "";
+    try {
+      window.ABCJS.renderAbc(paper, abc, {
+        responsive: "resize",
+        add_classes: true
+      });
+    } catch (e) {
+      renderStatus.textContent = "Render-Fehler: " + (e && e.message ? e.message : String(e));
+    }
+  }
+
+  // --- Sync ---
+  function sync() {
+    setOctaveLabel();
+    var abc = buildAbc();
+    abcOut.value = abc;
+    renderAbc(abc);
+  }
+
+  // --- Wire controls ---
+  function setSegActive(btnOn, btnOff) {
+    btnOn.classList.add("active");
+    btnOff.classList.remove("active");
+  }
+
+  accTypeSharps.addEventListener("click", function () {
+    state.accType = "sharps";
+    setSegActive(accTypeSharps, accTypeFlats);
+    sync();
+  });
+
+  accTypeFlats.addEventListener("click", function () {
+    state.accType = "flats";
+    setSegActive(accTypeFlats, accTypeSharps);
+    sync();
+  });
+
+  accCount.addEventListener("change", function () {
+    state.accCount = clampInt(accCount.value, 0, 7);
+    sync();
+  });
+
+  modeMajor.addEventListener("click", function () {
+    state.mode = "major";
+    setSegActive(modeMajor, modeMinor);
+    sync();
+  });
+
+  modeMinor.addEventListener("click", function () {
+    state.mode = "minor";
+    setSegActive(modeMinor, modeMajor);
+    sync();
+  });
+
+  meter.addEventListener("change", function () {
+    state.meter = meter.value || "4/4";
+    sync();
+  });
+
+  instrument.addEventListener("change", function () {
+    state.instrument = instrument.value || "Bb";
+    sync();
+  });
+
+  // Duration buttons
+  function setDurActive(targetBtn) {
+    var all = document.querySelectorAll(".btn.dur");
+    for (var i = 0; i < all.length; i++) all[i].classList.remove("active");
+    targetBtn.classList.add("active");
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t && t.classList && t.classList.contains("dur")) {
+      var v = t.getAttribute("data-dur");
+      state.dur = (v === "1/2") ? 0.5 : parseInt(v, 10);
+      setDurActive(t);
+      sync();
+    }
+  });
+
+  octDown.addEventListener("click", function () {
+    state.octave = Math.max(1, state.octave - 1);
+    sync();
+  });
+
+  octUp.addEventListener("click", function () {
+    state.octave = Math.min(8, state.octave + 1);
+    sync();
+  });
+
+  addRest.addEventListener("click", addRestToken);
+  addBar.addEventListener("click", addBarToken);
+  undo.addEventListener("click", undoToken);
+  clearBtn.addEventListener("click", clearTokens);
+
+  copyBtn.addEventListener("click", function () {
+    var text = abcOut.value || "";
+    copyStatus.textContent = "";
+    if (!navigator.clipboard || !navigator.clipboard.writeText) {
+      // fallback
+      abcOut.focus();
+      abcOut.select();
+      try {
+        var ok = document.execCommand("copy");
+        copyStatus.textContent = ok ? "Kopiert." : "Kopieren fehlgeschlagen.";
+      } catch (_) {
+        copyStatus.textContent = "Kopieren nicht verfügbar.";
+      }
+      return;
+    }
+    navigator.clipboard.writeText(text).then(function () {
+      copyStatus.textContent = "Kopiert.";
+    }).catch(function () {
+      copyStatus.textContent = "Kopieren fehlgeschlagen.";
+    });
+  });
+
+  // Init
+  buildPitchUI();
+  sync();
+})();
