@@ -20,7 +20,7 @@
     "G#":8, Ab:8,
     A:9,
     "A#":10, Bb:10,
-    B:11, Cb:11
+    B:11, H:11, Cb:11
   };
 
   var KEY_NAMES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
@@ -52,9 +52,19 @@
     return isMinor ? root + "m" : root;
   }
 
-  function describeKeyName(keyName) {
+  function germanizeKeyName(keyName) {
     var isMinor = keyName && keyName.endsWith("m");
     var root = isMinor ? keyName.slice(0, -1) : keyName;
+    var mapped = root;
+    if (root === "B") mapped = "H";     // B natural -> H
+    else if (root === "Bb") mapped = "B"; // Bb -> B (deutsch)
+    return isMinor ? mapped + "m" : mapped;
+  }
+
+  function describeKeyName(keyName) {
+    var displayName = germanizeKeyName(keyName);
+    var isMinor = displayName && displayName.endsWith("m");
+    var root = isMinor ? displayName.slice(0, -1) : displayName;
     return root + (isMinor ? "-Moll" : "-Dur");
   }
 
@@ -179,6 +189,7 @@
 
   var addRest       = $("addRest");
   var addBar        = $("addBar");
+  var addNewline    = $("addNewline");
   var undo          = $("undo");
   var clearBtn      = $("clear");
 
@@ -188,8 +199,8 @@
   var origKeyText   = $("origKeyText");
   var targetKeyLabel= $("targetKeyLabel");
 
-  // Build pitch palette (C D E F G A B) + chromatic accidentals via modifiers
-  // Keep it simple: diatonic buttons + accidental toggles (♯/♭/♮) applied to next note only.
+  // Build staff + chromatic accidentals via modifiers
+  // Accidental applies to the next placed pitch.
   var accidental = 0; // -1 flat, 0 natural, +1 sharp (applied to the next pitch)
 
   function makeButton(label, onClick, className) {
@@ -212,16 +223,11 @@
     accWrap.appendChild(makeButton("♯", function(){ accidental = 1;  setAccToggles(); }, "btn"));
     pitchButtons.appendChild(accWrap);
 
-    // Diatonic pitches
-    var notesWrap = document.createElement("div");
-    notesWrap.className = "btnwrap";
-    var diatonic = ["C","D","E","F","G","A","B"];
-    for (var i = 0; i < diatonic.length; i++) {
-      (function (p) {
-        notesWrap.appendChild(makeButton(p, function () { addPitch(p); }, "btn"));
-      })(diatonic[i]);
-    }
-    pitchButtons.appendChild(notesWrap);
+    // Staff field
+    var staffWrap = document.createElement("div");
+    staffWrap.className = "staff";
+    pitchButtons.appendChild(staffWrap);
+    buildStaffGrid(staffWrap);
 
     setAccToggles();
   }
@@ -235,23 +241,69 @@
       btns[i].style.outline = "none";
     }
     var idx = (accidental === -1) ? 0 : (accidental === 0 ? 1 : 2);
-    if (btns[idx]) btns[idx].style.outline = "2px solid rgba(255,255,255,0.18)";
+    if (btns[idx]) btns[idx].style.outline = "2px solid rgba(28,126,214,0.35)";
   }
 
-  // Convert chosen pitch + octave + accidental to MIDI
-  function pitchToMidi(letter, octave, accidentalDelta) {
-    // Base pitch classes for C D E F G A B
-    var base = { C:0, D:2, E:4, F:5, G:7, A:9, B:11 }[letter];
-    var pc = base + (accidentalDelta || 0);
-    // MIDI for C in that octave: C4=60 => formula: (octave+1)*12
-    var midi = (octave + 1) * 12 + pc;
-    return midi;
+  function buildStaffGrid(root) {
+    root.innerHTML = "";
+    var width = 720;
+    var height = 200;
+    var lineCount = 6;
+    var startY = 24;
+    var lineGap = 24;
+    // Diatonic mapping for 6 Linien (top -> bottom), anchored at C4 (unterstes Linie)
+    // Linien: A5, G5, F5, D5, B4, G4, E4, C4 (top to bottom with spaces)
+    var baseMidiPositions = [81,79,77,76,74,72,71,69,67,65,64,62,60];
+    var octaveOffset = (state.octave - 4) * 12;
+
+    var svgNS = "http://www.w3.org/2000/svg";
+    var svg = document.createElementNS(svgNS, "svg");
+    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
+    svg.setAttribute("class", "staff-svg");
+
+    // Draw lines (top to bottom)
+    for (var i = 0; i < lineCount; i++) {
+      var y = startY + i * lineGap;
+      var line = document.createElementNS(svgNS, "line");
+      line.setAttribute("x1", 12);
+      line.setAttribute("x2", width - 12);
+      line.setAttribute("y1", y);
+      line.setAttribute("y2", y);
+      line.setAttribute("class", "staff-line");
+      svg.appendChild(line);
+    }
+
+    // Click zones (lines + spaces, top to bottom)
+    var bandHeight = lineGap / 2;
+    for (var j = 0; j < baseMidiPositions.length; j++) {
+      var centerY = startY + j * bandHeight;
+      var rect = document.createElementNS(svgNS, "rect");
+      rect.setAttribute("x", 0);
+      rect.setAttribute("width", width);
+      rect.setAttribute("y", centerY - bandHeight / 2);
+      rect.setAttribute("height", bandHeight);
+      rect.setAttribute("class", "staff-zone");
+      rect.dataset.baseMidi = baseMidiPositions[j];
+      rect.dataset.midi = baseMidiPositions[j] + octaveOffset;
+      svg.appendChild(rect);
+    }
+
+    svg.addEventListener("click", function (e) {
+      var t = e.target;
+      if (t && t.dataset && t.dataset.baseMidi) {
+        var base = parseInt(t.dataset.baseMidi, 10);
+        var midi = base + (state.octave - 4) * 12;
+        addStaffNote(midi);
+      }
+    });
+
+    root.appendChild(svg);
   }
 
-  function addPitch(letter) {
-    var midi = pitchToMidi(letter, state.octave, accidental);
+  function addStaffNote(baseMidi) {
+    var midi = baseMidi + (accidental || 0);
     state.tokens.push({ kind: "note", midi: midi, dur: state.dur });
-    accidental = 0; // reset after placing
+    accidental = 0;
     setAccToggles();
     sync();
   }
@@ -263,6 +315,11 @@
 
   function addBarToken() {
     state.tokens.push({ kind: "bar" });
+    sync();
+  }
+
+  function addNewlineToken() {
+    state.tokens.push({ kind: "newline" });
     sync();
   }
 
@@ -279,6 +336,9 @@
   function setOctaveLabel() {
     // show as C{octave}
     octLabel.textContent = "C" + state.octave;
+    // Rebuild staff zones to reflect octave shift
+    var staff = document.querySelector(".staff");
+    if (staff) buildStaffGrid(staff);
   }
 
   function computeKeyInfo() {
@@ -319,6 +379,10 @@
         body.push("|");
         continue;
       }
+      if (t.kind === "newline") {
+        body.push("\n");
+        continue;
+      }
       if (t.kind === "rest") {
         body.push("z" + durToAbc(t.dur));
         continue;
@@ -330,11 +394,17 @@
       }
     }
 
-    // Keep it readable: insert a line break every ~16 tokens
+    // Keep it readable: respect explicit newlines, otherwise wrap every ~16 tokens
     var wrapped = [];
     var line = [];
     for (var j = 0; j < body.length; j++) {
-      line.push(body[j]);
+      var tok = body[j];
+      if (tok === "\n") {
+        wrapped.push(line.join(" "));
+        line = [];
+        continue;
+      }
+      line.push(tok);
       if (line.length >= 16) {
         wrapped.push(line.join(" "));
         line = [];
@@ -449,6 +519,7 @@
 
   addRest.addEventListener("click", addRestToken);
   addBar.addEventListener("click", addBarToken);
+  addNewline.addEventListener("click", addNewlineToken);
   undo.addEventListener("click", undoToken);
   clearBtn.addEventListener("click", clearTokens);
 
