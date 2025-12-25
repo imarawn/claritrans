@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>ClariTrans (MVP)</title>
+  <link rel="stylesheet" href="./style.css" />
+  <!-- abcjs via CDN -->
+  <script defer src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <header class="header">
+    <h1>ClariTrans</h1>
+    <p class="sub">Clientseitige Web-App zum schnellen Transponieren von Klarinetten-Stimmen (ABC + Live-Rendering).</p>
+  </header>
+
+  <main class="grid">
+    <section class="card">
+      <h2>1) Vorzeichen</h2>
+
+      <div class="row">
+        <label>Typ</label>
+        <div class="seg">
+          <button id="accTypeSharps" class="segbtn active" type="button">Kreuze ♯</button>
+          <button id="accTypeFlats" class="segbtn" type="button">B’s ♭</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label for="accCount">Anzahl</label>
+        <select id="accCount">
+          <option value="0">0</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5</option>
+          <option value="6">6</option>
+          <option value="7">7</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Modus</label>
+        <div class="seg">
+          <button id="modeMajor" class="segbtn active" type="button">Dur</button>
+          <button id="modeMinor" class="segbtn" type="button">Moll</button>
+        </div>
+      </div>
+
+      <div class="note">
+        Tonart wird aus den Vorzeichen automatisch bestimmt.
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2) Taktart & Instrument</h2>
+
+      <div class="row">
+        <label for="meter">Taktart</label>
+        <select id="meter">
+          <option value="4/4">4/4</option>
+          <option value="3/4">3/4</option>
+          <option value="2/4">2/4</option>
+          <option value="6/8">6/8</option>
+          <option value="12/8">12/8</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label for="instrument">Instrument</label>
+        <select id="instrument">
+          <option value="Bb">B-Klarinette (in B♭)</option>
+          <option value="A">A-Klarinette (in A)</option>
+          <option value="Eb">Es-Klarinette (in E♭)</option>
+        </select>
+      </div>
+
+      <div class="note">
+        Eingabe wird als <b>Konzertton</b> behandelt; Ausgabe ist die <b>notierte</b> Klarinettenstimme.
+      </div>
+    </section>
+
+    <section class="card wide">
+      <h2>3) Noten setzen</h2>
+
+      <div class="toolrow">
+        <div class="toolgroup">
+          <div class="label">Ton</div>
+          <div id="pitchButtons" class="btnwrap"></div>
+        </div>
+
+        <div class="toolgroup">
+          <div class="label">Oktave</div>
+          <div class="btnwrap">
+            <button id="octDown" class="btn" type="button">−</button>
+            <div id="octLabel" class="pill" title="C4 = Mittleres C (MIDI 60)">C4</div>
+            <button id="octUp" class="btn" type="button">+</button>
+          </div>
+        </div>
+
+        <div class="toolgroup">
+          <div class="label">Dauer</div>
+          <div class="btnwrap">
+            <button class="btn dur active" data-dur="1" type="button">♪ 1/8</button>
+            <button class="btn dur" data-dur="2" type="button">♩ 1/4</button>
+            <button class="btn dur" data-dur="4" type="button">𝅗𝅥 1/2</button>
+            <button class="btn dur" data-dur="8" type="button">𝅝 1</button>
+            <button class="btn dur" data-dur="1/2" type="button">𝅘𝅥𝅯 1/16</button>
+          </div>
+          <div class="small">L:1/8 (Standardlänge)</div>
+        </div>
+
+        <div class="toolgroup">
+          <div class="label">Aktionen</div>
+          <div class="btnwrap">
+            <button id="addRest" class="btn" type="button">Pause</button>
+            <button id="addBar" class="btn" type="button">Taktstrich |</button>
+            <button id="undo" class="btn" type="button">Rückgängig</button>
+            <button id="clear" class="btn danger" type="button">Leeren</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="split">
+        <div class="panel">
+          <h3>ABC (kopierbar)</h3>
+          <textarea id="abcOut" spellcheck="false" readonly></textarea>
+          <button id="copy" class="btn" type="button">ABC kopieren</button>
+          <div id="copyStatus" class="small"></div>
+        </div>
+
+        <div class="panel">
+          <h3>Vorschau (abcjs)</h3>
+          <div id="paper" class="paper"></div>
+          <div id="renderStatus" class="small"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>MVP • rein statisch • läuft auf GitHub Pages</span>
+  </footer>
+</body>
+</html>
