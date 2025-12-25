@@ -164,6 +164,8 @@
     instrument: "Bb",
     title: "",
     autoBars: true,
+    tokensPerLine: 16,
+    pitchShift: 0,
     // Note entry as concert MIDI numbers + duration in eighths
     // tokens: { kind:"note", midi:60, dur:2 } | { kind:"rest", dur:2 } | { kind:"bar" }
     tokens: [],
@@ -183,6 +185,8 @@
   var modeMinor     = $("modeMinor");
   var meter         = $("meter");
   var instrument    = $("instrument");
+  var tokensPerLine = $("tokensPerLine");
+  var pitchShift    = $("pitchShift");
 
   var pitchButtons  = $("pitchButtons");
   var octDown       = $("octDown");
@@ -210,6 +214,24 @@
   // Build staff + chromatic accidentals via modifiers
   // Accidental applies to the next placed pitch.
   var accidental = 0; // -1 flat, 0 natural, +1 sharp (applied to the next pitch)
+
+  // Helper: bind click + touchstart without double-trigger
+  function bindTouchClick(el, handler) {
+    if (!el) return;
+    var touchSeen = false;
+    el.addEventListener("touchstart", function (e) {
+      touchSeen = true;
+      e.preventDefault();
+      handler(e);
+    }, { passive: false });
+    el.addEventListener("click", function (e) {
+      if (touchSeen) {
+        touchSeen = false;
+        return;
+      }
+      handler(e);
+    });
+  }
 
   function makeButton(label, onClick, className) {
     var b = document.createElement("button");
@@ -261,17 +283,35 @@
 
   function buildStaffGrid(root) {
     root.innerHTML = "";
-    var width = 1100;
-    var height = 360;
+    var naturalPcs = [0, 2, 4, 5, 7, 9, 11];
+    // Reichweite: von G3 (mit ♭ erreichbar: F#3) bis B5 (mit ♯ erreichbar: C6)
+    var minMidi = 55;
+    var maxMidi = 83;
+    var baseMidiPositions = [];
+    for (var m = minMidi; m <= maxMidi; m++) {
+      var pc = ((m % 12) + 12) % 12;
+      if (naturalPcs.indexOf(pc) !== -1) baseMidiPositions.push(m);
+    }
+
+    var slots = baseMidiPositions.length;
+    var refMidi = 71; // B4 = Mittel-Linie im Violinschlüssel
+    var refIndex = baseMidiPositions.indexOf(refMidi);
+    if (refIndex === -1) refIndex = Math.floor(slots / 2);
+
+    var baseMargin = 24;
+    var noteStep = 16; // Abstand pro Linie/Leerraum, hält alles lesbar
+    var height = baseMargin * 2 + noteStep * (slots - 1);
     var lineCount = 5;
-    var startY = 40;
-    var lineGap = 44;
-    // 5-Linien-Notensystem (Violin-Schlüssel-ähnliche Lage), aufsteigend links->rechts
-    // C4, D4, E4, F4, G4, A4, B4, C5, D5, F5 (11 Stufen inkl. Zwischenräume)
-    var baseMidiPositions = [60,62,64,65,67,69,71,72,74,76,77];
+    var lineGap = noteStep * 2;
+    var minIdxY = refIndex - slots + 5;
+    var startY = baseMargin + (-minIdxY) * noteStep;
+
+    var noteSpacing = 80;
+    var paddingX = 60;
+    var width = paddingX * 2 + (slots - 1) * noteSpacing;
     var xPositions = [];
-    for (var xi = 0; xi < baseMidiPositions.length; xi++) {
-      xPositions.push(60 + xi * 90); // eine Note pro Zeile, nach rechts versetzt
+    for (var xi = 0; xi < slots; xi++) {
+      xPositions.push(paddingX + xi * noteSpacing);
     }
 
     var svgNS = "http://www.w3.org/2000/svg";
@@ -292,7 +332,7 @@
     }
 
     // Click zones + Noteheads (lines + spaces, top to bottom)
-    var bandHeight = lineGap / 2;
+    var bandHeight = noteStep;
     var octaveShift = (state.octave - 4) * 12;
     var useSharps = prefersSharps(state.accType, state.accCount);
 
@@ -312,10 +352,8 @@
       });
     }
 
-    var slots = baseMidiPositions.length;
-
     for (var j = 0; j < slots; j++) {
-      var idxY = (slots - 1 - j); // untere Stufe = niedrigste Note
+      var idxY = (refIndex - j) + 4; // B4 bleibt auf der mittleren Linie
       var centerY = startY + idxY * bandHeight;
       var rect = document.createElementNS(svgNS, "rect");
       rect.setAttribute("x", 0);
@@ -326,18 +364,19 @@
       rect.dataset.baseMidi = baseMidiPositions[j];
       svg.appendChild(rect);
 
+      var noteRadius = Math.min(20, bandHeight * 1.05);
       // Notehead preview (eine pro Zeile/Space, nach rechts versetzt)
       var head = document.createElementNS(svgNS, "circle");
       head.setAttribute("cx", xPositions[j]);
       head.setAttribute("cy", centerY);
-      head.setAttribute("r", 20);
+      head.setAttribute("r", noteRadius);
       head.setAttribute("class", "notehead");
       head.dataset.baseMidi = baseMidiPositions[j];
       svg.appendChild(head);
       // Label unter der Note
       var label = document.createElementNS(svgNS, "text");
       label.setAttribute("x", xPositions[j]);
-      label.setAttribute("y", centerY + 18);
+      label.setAttribute("y", centerY + (noteRadius - 2));
       label.setAttribute("class", "note-label");
       label.textContent = displayNoteName(baseMidiPositions[j] + octaveShift);
       svg.appendChild(label);
@@ -421,6 +460,7 @@
     var info = keyInfo || computeKeyInfo();
     var useSharps = info.preferSharps;
     var trans = info.transSemis;
+    var userShift = state.pitchShift || 0;
     var title = state.title || "";
     var measureLen = meterToEighths(state.meter);
 
@@ -457,7 +497,7 @@
         names.push(restToken);
         accCount += t.dur;
       } else if (t.kind === "note") {
-        var outMidi = t.midi + trans;
+        var outMidi = t.midi + userShift + trans;
         var noteText = midiToAbc(outMidi, useSharps);
         var durText = durToAbc(t.dur);
         body.push(noteText + durText);
@@ -476,9 +516,10 @@
       }
     }
 
-    // Keep it readable: respect explicit newlines, otherwise wrap every ~16 tokens
+    // Keep it readable: respect explicit newlines, otherwise wrap nach Wunsch (tokensPerLine)
     var wrapped = [];
     var line = [];
+    var wrapLen = clampInt(state.tokensPerLine, 0, 64);
     for (var j = 0; j < body.length; j++) {
       var tok = body[j];
       if (tok === "\n") {
@@ -487,7 +528,7 @@
         continue;
       }
       line.push(tok);
-      if (line.length >= 16) {
+      if (wrapLen > 0 && line.length >= wrapLen) {
         wrapped.push(line.join(" "));
         line = [];
       }
@@ -573,6 +614,30 @@
     sync();
   });
 
+  if (tokensPerLine) {
+    tokensPerLine.addEventListener("change", function () {
+      var v = parseInt(tokensPerLine.value, 10);
+      if (isNaN(v)) v = state.tokensPerLine;
+      v = Math.max(0, Math.min(64, v));
+      state.tokensPerLine = v;
+      tokensPerLine.value = v;
+      sync();
+    });
+    tokensPerLine.value = state.tokensPerLine;
+  }
+
+  if (pitchShift) {
+    pitchShift.addEventListener("change", function () {
+      var v = parseInt(pitchShift.value, 10);
+      if (isNaN(v)) v = state.pitchShift;
+      v = Math.max(-12, Math.min(12, v));
+      state.pitchShift = v;
+      pitchShift.value = v;
+      sync();
+    });
+    pitchShift.value = state.pitchShift;
+  }
+
   // Duration buttons
   function setDurActive(targetBtn) {
     var all = document.querySelectorAll(".btn.dur");
@@ -580,14 +645,32 @@
     targetBtn.classList.add("active");
   }
 
-  document.addEventListener("click", function (e) {
+  function handleDurTarget(t) {
+    if (!t || !t.classList || !t.classList.contains("dur")) return;
+    var v = t.getAttribute("data-dur");
+    state.dur = (v === "1/2") ? 0.5 : parseInt(v, 10);
+    setDurActive(t);
+    sync();
+  }
+
+  var durTouchSeen = false;
+  document.addEventListener("touchstart", function (e) {
     var t = e.target;
     if (t && t.classList && t.classList.contains("dur")) {
-      var v = t.getAttribute("data-dur");
-      state.dur = (v === "1/2") ? 0.5 : parseInt(v, 10);
-      setDurActive(t);
-      sync();
+      durTouchSeen = true;
+      e.preventDefault();
+      handleDurTarget(t);
     }
+  }, { passive: false });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (durTouchSeen) {
+      durTouchSeen = false;
+      // Skip the synthetic click after touch to avoid double execution.
+      if (t && t.classList && t.classList.contains("dur")) return;
+    }
+    handleDurTarget(t);
   });
 
   function adjustOctave(delta) {
@@ -603,16 +686,12 @@
     adjustOctave(1);
   });
 
-  addRest.addEventListener("click", addRestToken);
-  addBar.addEventListener("click", addBarToken);
-  addNewline.addEventListener("click", addNewlineToken);
-  undo.addEventListener("click", undoToken);
-  clearBtn.addEventListener("click", clearTokens);
-  if (printBtn) {
-    printBtn.addEventListener("click", function () {
-      window.print();
-    });
-  }
+  bindTouchClick(addRest, addRestToken);
+  bindTouchClick(addBar, addBarToken);
+  bindTouchClick(addNewline, addNewlineToken);
+  bindTouchClick(undo, undoToken);
+  bindTouchClick(clearBtn, clearTokens);
+  if (printBtn) bindTouchClick(printBtn, function () { window.print(); });
   if (titleInput) {
     titleInput.addEventListener("input", function () {
       state.title = titleInput.value || "";
@@ -626,6 +705,19 @@
     });
     state.autoBars = !!autoBars.checked;
   }
+
+  // Entferne den Produkt-Titel im Browser-Druckkopf: beim Drucken leerer Titel, danach zurücksetzen.
+  (function installPrintTitleHack() {
+    var originalTitle = document.title;
+    function clearTitle() {
+      document.title = " ";
+    }
+    function restoreTitle() {
+      document.title = originalTitle;
+    }
+    window.addEventListener("beforeprint", clearTitle);
+    window.addEventListener("afterprint", restoreTitle);
+  })();
 
   // Init
   buildPitchUI();

@@ -105,6 +105,20 @@
         <h2>3) Notenfeld</h2>
         <p class="note">Rechts findest du das klickbare Notenfeld. Töne setzen, Taktstriche oder Pausen hinzufügen und als ABC kopieren.</p>
       </div>
+
+      <div class="card">
+        <h2>4) Layout & Verschiebung</h2>
+        <div class="row">
+          <label for="tokensPerLine">Noten pro Zeile</label>
+          <input id="tokensPerLine" class="num-input" type="number" min="0" max="64" step="1" value="16" />
+        </div>
+        <p class="note">0 = kein automatischer Zeilenumbruch.</p>
+        <div class="row">
+          <label for="pitchShift">Halbton-Verschiebung</label>
+          <input id="pitchShift" class="num-input" type="number" min="-12" max="12" step="1" value="0" />
+        </div>
+        <p class="note">Alle Noten werden um diesen Halbtonwert verschoben (vor Instrumententransposition).</p>
+      </div>
     </section>
 
     <section class="workspace card">
