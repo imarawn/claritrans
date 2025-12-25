@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <title>ClariTrans</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- CSP: kein unsafe-eval -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data:;
+        font-src 'self' data:;
+      "
+    />
+
+    <style>
+      :root {
+        font-family: "Inter", system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+        color: #16233b;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: linear-gradient(135deg, #eff3fb 0%, #f8fbff 60%, #fefefe 100%);
+      }
+
+      header {
+        padding: 18px 32px;
+        border-bottom: 1px solid rgba(21, 31, 56, 0.08);
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        background:#ffffffd9;
+        backdrop-filter: blur(8px);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+
+      header h1 {
+        margin: 0;
+        font-size: 22px;
+      }
+
+      header p {
+        margin: 2px 0 0;
+        font-size: 13px;
+        opacity: .7;
+      }
+
+      .badge {
+        font-size:12px;
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: #eef1f7;
+        border: 1px solid rgba(22,35,59,0.08);
+      }
+
+      .status {
+        background:#e6f7f0;
+        color:#0b6b3c;
+        border-color:#bce7d0;
+      }
+
+      .wrap {
+        display: grid;
+        grid-template-columns: minmax(360px, 440px) 1fr;
+        gap: 28px;
+        padding: 28px;
+        height: calc(100vh - 76px);
+        box-sizing: border-box;
+      }
+
+      .panel {
+        background:#fff;
+        border-radius: 20px;
+        box-shadow: 0 20px 60px rgba(20, 33, 74, 0.1);
+        padding: 24px;
+        overflow:auto;
+      }
+
+      label {
+        display:block;
+        font-size: 12px;
+        margin: 12px 0 6px;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        opacity: .7;
+      }
+
+      select {
+        width: 100%;
+        padding: 10px 12px;
+        font-size: 14px;
+        border-radius: 12px;
+        border: 1px solid #dbe2f1;
+        background:#fdfefe;
+      }
+
+      .row { display:flex; gap:12px; align-items:center; }
+      .row > * { flex: 1; }
+
+      .btns {
+        display:flex;
+        gap:12px;
+        margin-top: 16px;
+      }
+
+      button {
+        padding: 12px 16px;
+        font-size: 14px;
+        cursor:pointer;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        background: #5c7cfa;
+        color:#fff;
+        box-shadow: 0 8px 20px rgba(92,124,250,0.3);
+        transition: transform .1s, box-shadow .1s;
+      }
+
+      button.secondary {
+        background:#f4f6fb;
+        color:#344563;
+        box-shadow:none;
+      }
+
+      button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 12px 24px rgba(92,124,250,0.35);
+      }
+
+      button.secondary:hover {
+        box-shadow: none;
+        transform: none;
+      }
+
+      .step {
+        border: 1px solid rgba(92,124,250,0.15);
+        border-radius: 18px;
+        padding: 18px;
+        margin-top: 18px;
+        background: #f9fbff;
+      }
+
+      .step:first-of-type {
+        margin-top: 0;
+      }
+
+      .step-head {
+        display:flex;
+        gap:14px;
+        align-items:flex-start;
+        margin-bottom: 14px;
+      }
+
+      .step-num {
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        background: #5c7cfa;
+        color:#fff;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        font-weight: 600;
+        box-shadow: 0 8px 20px rgba(92,124,250,0.35);
+      }
+
+      .step-head h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .step-head p {
+        margin: 4px 0 0;
+        font-size: 13px;
+        opacity: .7;
+      }
+
+      .sig-stack {
+        display:flex;
+        gap:18px;
+        flex-wrap:wrap;
+      }
+
+      .sig-column {
+        flex: 1;
+        min-width: 180px;
+      }
+
+      .sig-column h4 {
+        margin: 0 0 6px;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        opacity: .65;
+      }
+
+      .sig-group {
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+      }
+
+      .sig-btn {
+        border-radius: 30px;
+        border: 1px solid rgba(92,124,250,0.3);
+        padding: 6px 14px;
+        background:#fff;
+        color:#1c2747;
+        cursor:pointer;
+        font-weight: 600;
+        transition: all .15s;
+      }
+
+      .sig-btn.active {
+        background:#5c7cfa;
+        color:#fff;
+        border-color:#5c7cfa;
+        box-shadow: 0 10px 20px rgba(92,124,250,0.35);
+      }
+
+      .sig-actions {
+        display:flex;
+        gap:12px;
+        align-items:center;
+        margin-top: 14px;
+      }
+
+      .key-display {
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid rgba(15,23,42,0.1);
+        background:#fff;
+        flex:1;
+      }
+
+      .key-display span {
+        display:block;
+        font-size: 11px;
+        letter-spacing:.1em;
+        text-transform: uppercase;
+        opacity: .6;
+      }
+
+      .key-display strong {
+        display:block;
+        margin-top: 4px;
+        font-size: 15px;
+      }
+
+      #staffCanvas {
+        width: 100%;
+        max-width: 480px;
+        height: 220px;
+        border-radius: 16px;
+        background: linear-gradient(180deg, #fff 0%, #f8f9fb 100%);
+        display:block;
+        margin-top:10px;
+        border: 1px solid #e1e6f4;
+      }
+
+      .staff-btns button { flex: 1; }
+
+      pre {
+        background: #0f172a;
+        color:#cdd9ff;
+        padding: 14px;
+        border-radius: 14px;
+        border: none;
+        box-shadow: inset 0 0 0 1px rgba(255,255,255,0.08);
+      }
+
+      .hint {
+        font-size: 12px;
+        opacity: .75;
+        line-height: 1.5;
+        background: #f4f6fb;
+        padding: 10px 12px;
+        border-radius: 12px;
+        border: 1px dashed rgba(92,124,250,0.3);
+      }
+
+      #paper {
+        border-radius: 18px;
+        padding: 16px;
+        min-height: 160px;
+        background:#fdfdfd;
+        border: 1px solid #e5e8f3;
+        box-shadow: inset 0 0 0 1px rgba(90,112,150,0.08);
+      }
+
+      .hidden-input {
+        display:none;
+      }
+
+      @media (max-width: 960px) {
+        .wrap {
+          grid-template-columns: 1fr;
+          height: auto;
+        }
+      }
+    </style>
+  </head>
+
+  <body>
+    <header>
+      <div>
+        <h1>ClariTrans <span class="badge" id="ver"></span></h1>
+        <p>Transponiere Klarinetten-Stimmen direkt im Browser</p>
+      </div>
+      <div class="badge status" id="status">bereit</div>
+    </header>
+
+    <div class="wrap">
+      <div class="panel left">
+        <div class="step">
+          <div class="step-head">
+            <div class="step-num">1</div>
+            <div>
+              <h3>Vorzeichen erkennen</h3>
+              <p>Setze Kreuze oder Bes wie im Original, um die Tonart automatisch bestimmen zu lassen.</p>
+            </div>
+          </div>
+
+          <div class="sig-stack">
+            <div class="sig-column">
+              <h4>Kreuze</h4>
+              <div class="sig-group" data-type="sharp">
+                <button type="button" class="sig-btn" data-acc="F#">F♯</button>
+                <button type="button" class="sig-btn" data-acc="C#">C♯</button>
+                <button type="button" class="sig-btn" data-acc="G#">G♯</button>
+                <button type="button" class="sig-btn" data-acc="D#">D♯</button>
+                <button type="button" class="sig-btn" data-acc="A#">A♯</button>
+                <button type="button" class="sig-btn" data-acc="E#">E♯</button>
+                <button type="button" class="sig-btn" data-acc="B#">B♯</button>
+              </div>
+            </div>
+            <div class="sig-column">
+              <h4>Bes</h4>
+              <div class="sig-group" data-type="flat">
+                <button type="button" class="sig-btn" data-acc="Bb">Bb</button>
+                <button type="button" class="sig-btn" data-acc="Eb">Eb</button>
+                <button type="button" class="sig-btn" data-acc="Ab">Ab</button>
+                <button type="button" class="sig-btn" data-acc="Db">Db</button>
+                <button type="button" class="sig-btn" data-acc="Gb">Gb</button>
+                <button type="button" class="sig-btn" data-acc="Cb">Cb</button>
+                <button type="button" class="sig-btn" data-acc="Fb">Fb</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="sig-actions">
+            <button type="button" id="btnSigReset" class="secondary">Keine Vorzeichen</button>
+            <div class="key-display">
+              <span>erkannte Tonart</span>
+              <strong id="keyDetected">C-Dur / a-moll</strong>
+            </div>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-head">
+            <div class="step-num">2</div>
+            <div>
+              <h3>Takt & Instrument</h3>
+              <p>Lege das Metrum fest und wähle deine Klarinette.</p>
+            </div>
+          </div>
+
+          <div class="row">
+            <div>
+              <label>Taktart</label>
+              <select id="meter">
+                <option value="4/4">4/4</option>
+                <option value="3/4">3/4</option>
+                <option value="2/4">2/4</option>
+                <option value="6/8">6/8</option>
+                <option value="9/8">9/8</option>
+              </select>
+            </div>
+            <div>
+              <label>Klarinette</label>
+              <select id="clarinet">
+                <option value="Bb">B-Klarinette (Bb)</option>
+                <option value="A">A-Klarinette</option>
+                <option value="Eb">Es-Klarinette (Eb)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="btns">
+            <button id="btnRender">Rendern</button>
+            <button id="btnCopy" class="secondary">ABC kopieren</button>
+          </div>
+        </div>
+
+        <div class="step">
+          <div class="step-head">
+            <div class="step-num">3</div>
+            <div>
+              <h3>Noten setzen</h3>
+              <p>Klicke ins Notenblatt, um deine Melodie zu erfassen. Taktstriche kannst du separat hinzufügen.</p>
+            </div>
+          </div>
+
+          <canvas id="staffCanvas" width="520" height="220"></canvas>
+          <div class="hint" style="margin-top:12px;">
+            Vorzeichen werden automatisch übernommen. Dünne Hilfslinien markieren zusätzliche Oktaven.
+          </div>
+          <div class="btns staff-btns">
+            <button id="btnStaffBar" class="secondary">Taktstrich</button>
+            <button id="btnStaffUndo" class="secondary">Rückgängig</button>
+            <button id="btnStaffClear" class="secondary">Leeren</button>
+          </div>
+        </div>
+
+        <textarea id="in" class="hidden-input"></textarea>
+      </div>
+
+      <div class="panel right">
+        <label>Notenbild (Preview)</label>
+        <div id="paper"></div>
+
+        <label style="margin: 24px 0 6px;">Generiertes ABC</label>
+        <pre id="abc"></pre>
+      </div>
+    </div>
+
+    <!-- abcjs via CDN, damit die Seite auch auf GitHub Pages funktioniert -->
+    <script src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js" integrity="sha256-Zt3R9J7HANxnrPGuJuye3nMu2PFGNF6PlQ1PDSt7Pk8=" crossorigin="anonymous"></script>
+
+    <!-- dein Renderer als ESM (nur relative imports) -->
+    <script type="module" src="./renderer.js"></script>
+  </body>
+</html>
