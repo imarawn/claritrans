@@ -162,6 +162,8 @@
     mode: "major",      // "major" | "minor"
     meter: "4/4",
     instrument: "Bb",
+    title: "",
+    autoBars: true,
     // Note entry as concert MIDI numbers + duration in eighths
     // tokens: { kind:"note", midi:60, dur:2 } | { kind:"rest", dur:2 } | { kind:"bar" }
     tokens: [],
@@ -186,18 +188,24 @@
   var octDown       = $("octDown");
   var octUp         = $("octUp");
   var octLabel      = $("octLabel");
+  var staffOctDown;
+  var staffOctUp;
 
   var addRest       = $("addRest");
   var addBar        = $("addBar");
   var addNewline    = $("addNewline");
   var undo          = $("undo");
   var clearBtn      = $("clear");
+  var autoBars      = $("autoBars");
 
   var paper         = $("paper");
   var renderStatus  = $("renderStatus");
+  var noteNamesEl   = $("noteNames");
   var origKeyLabel  = $("origKeyLabel");
   var origKeyText   = $("origKeyText");
   var targetKeyLabel= $("targetKeyLabel");
+  var printBtn      = $("print");
+  var titleInput    = $("titleInput");
 
   // Build staff + chromatic accidentals via modifiers
   // Accidental applies to the next placed pitch.
@@ -226,6 +234,13 @@
     // Staff field
     var staffWrap = document.createElement("div");
     staffWrap.className = "staff";
+    var staffControls = document.createElement("div");
+    staffControls.className = "staff-controls";
+    staffOctDown = makeButton("−", function () { adjustOctave(-1); }, "btn sm");
+    staffOctUp   = makeButton("+", function () { adjustOctave(1); }, "btn sm");
+    staffControls.appendChild(staffOctDown);
+    staffControls.appendChild(staffOctUp);
+    staffWrap.appendChild(staffControls);
     pitchButtons.appendChild(staffWrap);
     buildStaffGrid(staffWrap);
 
@@ -246,15 +261,18 @@
 
   function buildStaffGrid(root) {
     root.innerHTML = "";
-    var width = 720;
-    var height = 200;
-    var lineCount = 6;
-    var startY = 24;
-    var lineGap = 24;
-    // Diatonic mapping for 6 Linien (top -> bottom), anchored at C4 (unterstes Linie)
-    // Linien: A5, G5, F5, D5, B4, G4, E4, C4 (top to bottom with spaces)
-    var baseMidiPositions = [81,79,77,76,74,72,71,69,67,65,64,62,60];
-    var octaveOffset = (state.octave - 4) * 12;
+    var width = 1100;
+    var height = 360;
+    var lineCount = 5;
+    var startY = 40;
+    var lineGap = 44;
+    // 5-Linien-Notensystem (Violin-Schlüssel-ähnliche Lage), aufsteigend links->rechts
+    // C4, D4, E4, F4, G4, A4, B4, C5, D5, F5 (11 Stufen inkl. Zwischenräume)
+    var baseMidiPositions = [60,62,64,65,67,69,71,72,74,76,77];
+    var xPositions = [];
+    for (var xi = 0; xi < baseMidiPositions.length; xi++) {
+      xPositions.push(60 + xi * 90); // eine Note pro Zeile, nach rechts versetzt
+    }
 
     var svgNS = "http://www.w3.org/2000/svg";
     var svg = document.createElementNS(svgNS, "svg");
@@ -273,10 +291,32 @@
       svg.appendChild(line);
     }
 
-    // Click zones (lines + spaces, top to bottom)
+    // Click zones + Noteheads (lines + spaces, top to bottom)
     var bandHeight = lineGap / 2;
-    for (var j = 0; j < baseMidiPositions.length; j++) {
-      var centerY = startY + j * bandHeight;
+    var octaveShift = (state.octave - 4) * 12;
+    var useSharps = prefersSharps(state.accType, state.accCount);
+
+    function displayNoteName(midi) {
+      var pc = ((midi % 12) + 12) % 12;
+      var octave = Math.floor(midi / 12) - 1;
+      var namesSharp = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","H"];
+      var namesFlat  = ["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B","H"];
+      var name = (useSharps ? namesSharp : namesFlat)[pc];
+      return name + octave;
+    }
+
+    function attachClick(el, base) {
+      el.addEventListener("click", function () {
+        var midi = base + octaveShift;
+        addStaffNote(midi);
+      });
+    }
+
+    var slots = baseMidiPositions.length;
+
+    for (var j = 0; j < slots; j++) {
+      var idxY = (slots - 1 - j); // untere Stufe = niedrigste Note
+      var centerY = startY + idxY * bandHeight;
       var rect = document.createElementNS(svgNS, "rect");
       rect.setAttribute("x", 0);
       rect.setAttribute("width", width);
@@ -284,18 +324,27 @@
       rect.setAttribute("height", bandHeight);
       rect.setAttribute("class", "staff-zone");
       rect.dataset.baseMidi = baseMidiPositions[j];
-      rect.dataset.midi = baseMidiPositions[j] + octaveOffset;
       svg.appendChild(rect);
-    }
 
-    svg.addEventListener("click", function (e) {
-      var t = e.target;
-      if (t && t.dataset && t.dataset.baseMidi) {
-        var base = parseInt(t.dataset.baseMidi, 10);
-        var midi = base + (state.octave - 4) * 12;
-        addStaffNote(midi);
-      }
-    });
+      // Notehead preview (eine pro Zeile/Space, nach rechts versetzt)
+      var head = document.createElementNS(svgNS, "circle");
+      head.setAttribute("cx", xPositions[j]);
+      head.setAttribute("cy", centerY);
+      head.setAttribute("r", 20);
+      head.setAttribute("class", "notehead");
+      head.dataset.baseMidi = baseMidiPositions[j];
+      svg.appendChild(head);
+      // Label unter der Note
+      var label = document.createElementNS(svgNS, "text");
+      label.setAttribute("x", xPositions[j]);
+      label.setAttribute("y", centerY + 18);
+      label.setAttribute("class", "note-label");
+      label.textContent = displayNoteName(baseMidiPositions[j] + octaveShift);
+      svg.appendChild(label);
+      attachClick(head, baseMidiPositions[j]);
+
+      attachClick(rect, baseMidiPositions[j]);
+    }
 
     root.appendChild(svg);
   }
@@ -341,6 +390,16 @@
     if (staff) buildStaffGrid(staff);
   }
 
+  function meterToEighths(meter) {
+    if (!meter || typeof meter !== "string") return 8;
+    var parts = meter.split("/");
+    if (parts.length !== 2) return 8;
+    var num = parseInt(parts[0], 10);
+    var den = parseInt(parts[1], 10);
+    if (!num || !den) return 8;
+    return num * (8 / den);
+  }
+
   function computeKeyInfo() {
     var key = keyFromSignature(state.accType, state.accCount, state.mode);
     var preferSharpNames = prefersSharps(state.accType, state.accCount);
@@ -362,35 +421,58 @@
     var info = keyInfo || computeKeyInfo();
     var useSharps = info.preferSharps;
     var trans = info.transSemis;
+    var title = state.title || "";
+    var measureLen = meterToEighths(state.meter);
 
     // Header
     var abc = [];
     abc.push("X:1");
-    abc.push("T:");
+    abc.push("T:" + title);
     abc.push("M:" + state.meter);
     abc.push("L:1/8");
     abc.push("K:" + info.writtenKeyName);
 
     // Body: transpose MIDI notes for instrument
     var body = [];
+    var names = [];
+    var accCount = 0;
+
     for (var i = 0; i < state.tokens.length; i++) {
       var t = state.tokens[i];
       if (t.kind === "bar") {
         body.push("|");
+        names.push("|");
+        accCount = 0;
         continue;
       }
       if (t.kind === "newline") {
         body.push("\n");
+        names.push("\n");
+        accCount = 0;
         continue;
       }
       if (t.kind === "rest") {
-        body.push("z" + durToAbc(t.dur));
+        var restToken = "z" + durToAbc(t.dur);
+        body.push(restToken);
+        names.push(restToken);
+        accCount += t.dur;
+      } else if (t.kind === "note") {
+        var outMidi = t.midi + trans;
+        var noteText = midiToAbc(outMidi, useSharps);
+        var durText = durToAbc(t.dur);
+        body.push(noteText + durText);
+        names.push(noteText);
+        accCount += t.dur;
+      } else {
         continue;
       }
-      if (t.kind === "note") {
-        var outMidi = t.midi + trans;
-        body.push(midiToAbc(outMidi, useSharps) + durToAbc(t.dur));
-        continue;
+
+      if (state.autoBars && measureLen > 0) {
+        while (accCount >= measureLen) {
+          body.push("|");
+          names.push("|");
+          accCount -= measureLen;
+        }
       }
     }
 
@@ -413,7 +495,7 @@
     if (line.length) wrapped.push(line.join(" "));
 
     abc.push(wrapped.join("\n"));
-    return abc.join("\n");
+    return { abc: abc.join("\n"), names: names.join(" ") };
   }
 
   function renderAbc(abc) {
@@ -441,8 +523,9 @@
     if (origKeyText) origKeyText.textContent = originalName;
     if (targetKeyLabel) targetKeyLabel.textContent = describeKeyName(keyInfo.writtenKeyName);
     setOctaveLabel();
-    var abc = buildAbc(keyInfo);
-    renderAbc(abc);
+    var res = buildAbc(keyInfo);
+    if (noteNamesEl) noteNamesEl.textContent = res.names;
+    renderAbc(res.abc);
   }
 
   // --- Wire controls ---
@@ -507,14 +590,17 @@
     }
   });
 
-  octDown.addEventListener("click", function () {
-    state.octave = Math.max(1, state.octave - 1);
+  function adjustOctave(delta) {
+    state.octave = Math.min(8, Math.max(1, state.octave + delta));
     sync();
+  }
+
+  octDown.addEventListener("click", function () {
+    adjustOctave(-1);
   });
 
   octUp.addEventListener("click", function () {
-    state.octave = Math.min(8, state.octave + 1);
-    sync();
+    adjustOctave(1);
   });
 
   addRest.addEventListener("click", addRestToken);
@@ -522,6 +608,24 @@
   addNewline.addEventListener("click", addNewlineToken);
   undo.addEventListener("click", undoToken);
   clearBtn.addEventListener("click", clearTokens);
+  if (printBtn) {
+    printBtn.addEventListener("click", function () {
+      window.print();
+    });
+  }
+  if (titleInput) {
+    titleInput.addEventListener("input", function () {
+      state.title = titleInput.value || "";
+      sync();
+    });
+  }
+  if (autoBars) {
+    autoBars.addEventListener("change", function () {
+      state.autoBars = !!autoBars.checked;
+      sync();
+    });
+    state.autoBars = !!autoBars.checked;
+  }
 
   // Init
   buildPitchUI();

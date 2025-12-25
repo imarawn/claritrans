@@ -78,8 +78,14 @@
             <option value="4/4">4/4</option>
             <option value="3/4">3/4</option>
             <option value="2/4">2/4</option>
+            <option value="3/8">3/8</option>
             <option value="6/8">6/8</option>
             <option value="12/8">12/8</option>
+            <option value="2/2">2/2</option>
+            <option value="5/4">5/4</option>
+            <option value="5/8">5/8</option>
+            <option value="7/8">7/8</option>
+            <option value="9/8">9/8</option>
           </select>
         </div>
 
@@ -145,14 +151,20 @@
             <button id="undo" class="btn" type="button">Rückgängig</button>
             <button id="clear" class="btn danger" type="button">Leeren</button>
           </div>
+          <div class="small"><label><input type="checkbox" id="autoBars" checked /> Taktstriche automatisch</label></div>
         </div>
       </div>
 
       <div class="split">
         <div class="panel">
-          <h3>Vorschau (abcjs)</h3>
+          <div class="title-row">
+            <label for="titleInput" class="label small">Stücktitel</label>
+            <input id="titleInput" class="title-input" type="text" placeholder="Titel eingeben" />
+          </div>
           <div id="paper" class="paper"></div>
+          <div id="noteNames" class="small"></div>
           <div id="renderStatus" class="small"></div>
+          <button id="print" class="btn" type="button">Drucken</button>
         </div>
       </div>
     </section>
