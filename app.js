@@ -210,6 +210,9 @@
   var targetKeyLabel= $("targetKeyLabel");
   var printBtn      = $("print");
   var titleInput    = $("titleInput");
+  var themeToggle   = $("themeToggle");
+  var menuToggle    = $("menuToggle");
+  var drawerOverlay = $("drawerOverlay");
 
   // Build staff + chromatic accidentals via modifiers
   // Accidental applies to the next placed pitch.
@@ -373,6 +376,31 @@
       head.setAttribute("class", "notehead");
       head.dataset.baseMidi = baseMidiPositions[j];
       svg.appendChild(head);
+
+      // Ledger lines for notes outside the 5-line staff
+      var topLineY = startY;
+      var bottomLineY = startY + (lineCount - 1) * lineGap;
+      var ledgerSpacing = lineGap;
+      var ledgerWidth = 60;
+      function addLedgerLine(yPos) {
+        var l = document.createElementNS(svgNS, "line");
+        l.setAttribute("x1", xPositions[j] - ledgerWidth / 2);
+        l.setAttribute("x2", xPositions[j] + ledgerWidth / 2);
+        l.setAttribute("y1", yPos);
+        l.setAttribute("y2", yPos);
+        l.setAttribute("class", "ledger-line");
+        svg.appendChild(l);
+      }
+      if (centerY < topLineY - bandHeight) {
+        for (var ly = topLineY - ledgerSpacing; ly >= centerY - bandHeight; ly -= ledgerSpacing) {
+          addLedgerLine(ly);
+        }
+      } else if (centerY > bottomLineY + bandHeight) {
+        for (var ly2 = bottomLineY + ledgerSpacing; ly2 <= centerY + bandHeight; ly2 += ledgerSpacing) {
+          addLedgerLine(ly2);
+        }
+      }
+
       // Label unter der Note
       var label = document.createElementNS(svgNS, "text");
       label.setAttribute("x", xPositions[j]);
@@ -477,8 +505,17 @@
     var names = [];
     var accCount = 0;
 
-    for (var i = 0; i < state.tokens.length; i++) {
-      var t = state.tokens[i];
+    var renderTokens = state.tokens.length ? state.tokens : [{ kind: "placeholder" }];
+
+    for (var i = 0; i < renderTokens.length; i++) {
+      var t = renderTokens[i];
+      if (t.kind === "placeholder") {
+        var placeholderDur = measureLen > 0 ? measureLen : 8;
+        body.push("!style=opacity:0.001!z" + durToAbc(placeholderDur));
+        names.push("");
+        accCount = 0;
+        continue;
+      }
       if (t.kind === "bar") {
         body.push("|");
         names.push("|");
@@ -705,6 +742,48 @@
     });
     state.autoBars = !!autoBars.checked;
   }
+
+  // Theme toggle (light/dark), persists in localStorage. Paper/staff bleiben weiß, da deren Styles feste Farben nutzen.
+  function applyTheme(theme) {
+    var mode = (theme === "dark") ? "dark" : "light";
+    document.body.classList.toggle("dark", mode === "dark");
+    if (themeToggle) themeToggle.textContent = mode === "dark" ? "Light Mode" : "Dark Mode";
+    try { localStorage.setItem("claritrans-theme", mode); } catch (e) {}
+  }
+  if (themeToggle) {
+    bindTouchClick(themeToggle, function () {
+      var next = document.body.classList.contains("dark") ? "light" : "dark";
+      applyTheme(next);
+    });
+  }
+  (function initTheme(){
+    var saved = "light";
+    try { saved = localStorage.getItem("claritrans-theme") || "light"; } catch(e){}
+    applyTheme(saved);
+  })();
+
+  // Drawer (Burger-Menü) für die Sidebar
+  function setDrawer(open) {
+    document.body.classList.toggle("drawer-open", open);
+    document.body.classList.toggle("drawer-closed", !open);
+    if (menuToggle) {
+      menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      menuToggle.textContent = open ? "✕ Schließen" : "☰ Menü";
+    }
+  }
+  if (menuToggle) {
+    bindTouchClick(menuToggle, function () {
+      var next = !document.body.classList.contains("drawer-open");
+      setDrawer(next);
+    });
+  }
+  if (drawerOverlay) {
+    bindTouchClick(drawerOverlay, function () { setDrawer(false); });
+  }
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") setDrawer(false);
+  });
+  setDrawer(false);
 
   // Entferne den Produkt-Titel im Browser-Druckkopf: beim Drucken leerer Titel, danach zurücksetzen.
   (function installPrintTitleHack() {
