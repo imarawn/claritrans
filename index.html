@@ -7,6 +7,8 @@
   <link rel="stylesheet" href="./style.css" />
   <!-- abcjs via CDN -->
   <script defer src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js"></script>
   <script defer src="./app.js"></script>
 </head>
 <body>
@@ -187,7 +189,10 @@
           <div id="paper" class="paper"></div>
           <div id="noteNames" class="small"></div>
           <div id="renderStatus" class="small"></div>
-          <button id="print" class="btn" type="button">Drucken</button>
+          <div class="btnwrap">
+            <button id="print" class="btn" type="button">Drucken</button>
+            <button id="savePdf" class="btn" type="button">Als PDF speichern</button>
+          </div>
         </div>
       </div>
     </section>

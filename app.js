@@ -209,6 +209,7 @@
   var origKeyText   = $("origKeyText");
   var targetKeyLabel= $("targetKeyLabel");
   var printBtn      = $("print");
+  var savePdfBtn    = $("savePdf");
   var titleInput    = $("titleInput");
   var themeToggle   = $("themeToggle");
   var menuToggle    = $("menuToggle");
@@ -728,7 +729,9 @@
   bindTouchClick(addNewline, addNewlineToken);
   bindTouchClick(undo, undoToken);
   bindTouchClick(clearBtn, clearTokens);
-  if (printBtn) bindTouchClick(printBtn, function () { window.print(); });
+  function triggerPrint() { window.print(); }
+  if (printBtn) bindTouchClick(printBtn, triggerPrint);
+  if (savePdfBtn) bindTouchClick(savePdfBtn, downloadPdf);
   if (titleInput) {
     titleInput.addEventListener("input", function () {
       state.title = titleInput.value || "";
@@ -784,6 +787,86 @@
     if (e.key === "Escape") setDrawer(false);
   });
   setDrawer(false);
+
+  // Export als PDF direkt aus dem gerenderten SVG (mobil-freundlicher als window.print)
+  // Try to resolve svg2pdf from various UMD shapes
+  function getSvg2pdfFn() {
+    if (typeof window.svg2pdf === "function") return window.svg2pdf;
+    if (window.svg2pdf && typeof window.svg2pdf.default === "function") return window.svg2pdf.default;
+    if (window.svg2pdf && typeof window.svg2pdf.svg2pdf === "function") return window.svg2pdf.svg2pdf;
+    if (typeof window.svg2pdfjs === "function") return window.svg2pdfjs;
+    if (window.svg2pdfjs && typeof window.svg2pdfjs.default === "function") return window.svg2pdfjs.default;
+    if (window.svg2pdfjs && typeof window.svg2pdfjs.svg2pdf === "function") return window.svg2pdfjs.svg2pdf;
+    return null;
+  }
+  var svg2pdfLoader;
+  function ensureSvg2pdf() {
+    var fn = getSvg2pdfFn();
+    if (fn) return Promise.resolve(fn);
+    if (svg2pdfLoader) return svg2pdfLoader;
+    svg2pdfLoader = new Promise(function (resolve, reject) {
+      var script = document.createElement("script");
+      script.src = "https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js";
+      script.onload = function () {
+        var f = getSvg2pdfFn();
+        if (f) resolve(f); else reject(new Error("svg2pdf after load not found"));
+      };
+      script.onerror = function () { reject(new Error("svg2pdf load failed")); };
+      document.head.appendChild(script);
+    });
+    return svg2pdfLoader;
+  }
+
+  async function downloadPdf() {
+    if (!window.jspdf) {
+      if (renderStatus) renderStatus.textContent = "PDF-Export: jsPDF nicht geladen.";
+      return;
+    }
+    var svg2pdfFn = null;
+    try {
+      svg2pdfFn = await ensureSvg2pdf();
+    } catch (e) {
+      if (renderStatus) renderStatus.textContent = "PDF-Export: svg2pdf konnte nicht geladen werden.";
+      return;
+    }
+    var svg = paper && paper.querySelector("svg");
+    if (!svg) {
+      if (renderStatus) renderStatus.textContent = "PDF-Export: Kein Notenblatt gefunden.";
+      return;
+    }
+    var { jsPDF } = window.jspdf;
+    var doc = new jsPDF({ unit: "pt", format: "a4" });
+
+    // SVG duplizieren, damit wir daran style/size anpassen können
+    var clone = svg.cloneNode(true);
+    var svgWidth = parseFloat(clone.getAttribute("width")) || 800;
+    var svgHeight = parseFloat(clone.getAttribute("height")) || 400;
+    // Falls width/height fehlen, aus viewBox ableiten
+    var vb = clone.getAttribute("viewBox");
+    if (vb) {
+      var parts = vb.split(/\s+/).map(parseFloat);
+      if (parts.length === 4) {
+        svgWidth = parts[2];
+        svgHeight = parts[3];
+      }
+    }
+    // Skaliere auf A4 mit etwas Rand
+    var pageW = doc.internal.pageSize.getWidth();
+    var pageH = doc.internal.pageSize.getHeight();
+    var margin = 24;
+    var scale = Math.min((pageW - margin * 2) / svgWidth, (pageH - margin * 2) / svgHeight);
+    var x = margin;
+    var y = margin;
+
+    svg2pdfFn(clone, doc, {
+      x: x,
+      y: y,
+      width: svgWidth * scale,
+      height: svgHeight * scale
+    });
+    doc.save("claritrans.pdf");
+    if (renderStatus) renderStatus.textContent = "PDF gespeichert.";
+  }
 
   // Entferne den Produkt-Titel im Browser-Druckkopf: beim Drucken leerer Titel, danach zurücksetzen.
   (function installPrintTitleHack() {
