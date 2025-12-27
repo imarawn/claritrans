@@ -162,6 +162,11 @@ select{
   border-color:#c8defa;
   color:var(--accent);
 }
+.btn.toggle.active{
+  background:var(--accent-soft);
+  border-color:#c8defa;
+  color:var(--accent);
+}
 .btn:hover{background:var(--btn2)}
 .btn.danger{background:var(--danger);border-color:#f6b5c2}
 .btn.danger:hover{background:var(--danger2)}

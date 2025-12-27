@@ -166,6 +166,8 @@
     autoBars: true,
     tokensPerLine: 16,
     pitchShift: 0,
+    slurStartNext: false,
+    slurEndNext: false,
     // Note entry as concert MIDI numbers + duration in eighths
     // tokens: { kind:"note", midi:60, dur:2 } | { kind:"rest", dur:2 } | { kind:"bar" }
     tokens: [],
@@ -198,6 +200,8 @@
   var addRest       = $("addRest");
   var addBar        = $("addBar");
   var addNewline    = $("addNewline");
+  var slurStartBtn  = $("slurStart");
+  var slurEndBtn    = $("slurEnd");
   var undo          = $("undo");
   var clearBtn      = $("clear");
   var autoBars      = $("autoBars");
@@ -419,8 +423,17 @@
 
   function addStaffNote(baseMidi) {
     var midi = baseMidi + (accidental || 0);
-    state.tokens.push({ kind: "note", midi: midi, dur: state.dur });
+    state.tokens.push({
+      kind: "note",
+      midi: midi,
+      dur: state.dur,
+      slurStart: state.slurStartNext,
+      slurEnd: state.slurEndNext
+    });
     accidental = 0;
+    state.slurStartNext = false;
+    state.slurEndNext = false;
+    updateSlurButtons();
     setAccToggles();
     sync();
   }
@@ -538,8 +551,10 @@
         var outMidi = t.midi + userShift + trans;
         var noteText = midiToAbc(outMidi, useSharps);
         var durText = durToAbc(t.dur);
-        body.push(noteText + durText);
-        names.push(noteText);
+        var prefix = t.slurStart ? "(" : "";
+        var suffix = t.slurEnd ? ")" : "";
+        body.push(prefix + noteText + durText + suffix);
+        names.push(prefix + noteText + suffix);
         accCount += t.dur;
       } else {
         continue;
@@ -727,6 +742,23 @@
   bindTouchClick(addRest, addRestToken);
   bindTouchClick(addBar, addBarToken);
   bindTouchClick(addNewline, addNewlineToken);
+  function updateSlurButtons() {
+    if (slurStartBtn) slurStartBtn.classList.toggle("active", state.slurStartNext);
+    if (slurEndBtn) slurEndBtn.classList.toggle("active", state.slurEndNext);
+  }
+  updateSlurButtons();
+  if (slurStartBtn) {
+    bindTouchClick(slurStartBtn, function () {
+      state.slurStartNext = !state.slurStartNext;
+      updateSlurButtons();
+    });
+  }
+  if (slurEndBtn) {
+    bindTouchClick(slurEndBtn, function () {
+      state.slurEndNext = !state.slurEndNext;
+      updateSlurButtons();
+    });
+  }
   bindTouchClick(undo, undoToken);
   bindTouchClick(clearBtn, clearTokens);
   function triggerPrint() { window.print(); }
@@ -817,16 +849,59 @@
     return svg2pdfLoader;
   }
 
+  function getSvgDims(svg) {
+    var w = parseFloat(svg.getAttribute("width")) || 0;
+    var h = parseFloat(svg.getAttribute("height")) || 0;
+    var vb = svg.getAttribute("viewBox");
+    if ((!w || !h) && vb) {
+      var parts = vb.split(/\s+/).map(parseFloat);
+      if (parts.length === 4) {
+        w = parts[2];
+        h = parts[3];
+      }
+    }
+    if ((!w || !h) && svg.getBBox) {
+      try {
+        var bb = svg.getBBox();
+        w = w || bb.width;
+        h = h || bb.height;
+      } catch (e) {}
+    }
+    return { w: w || 800, h: h || 400 };
+  }
+
+  function svgToPngDataUrl(svg, width, height) {
+    return new Promise(function (resolve, reject) {
+      var serializer = new XMLSerializer();
+      var svgStr = serializer.serializeToString(svg);
+      var blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+      var url = URL.createObjectURL(blob);
+      var img = new Image();
+      img.onload = function () {
+        var canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        var ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        URL.revokeObjectURL(url);
+        try {
+          var dataUrl = canvas.toDataURL("image/png");
+          resolve(dataUrl);
+        } catch (err) {
+          reject(err);
+        }
+      };
+      img.onerror = function (e) {
+        URL.revokeObjectURL(url);
+        reject(e);
+      };
+      img.src = url;
+    });
+  }
+
   async function downloadPdf() {
     if (!window.jspdf) {
       if (renderStatus) renderStatus.textContent = "PDF-Export: jsPDF nicht geladen.";
-      return;
-    }
-    var svg2pdfFn = null;
-    try {
-      svg2pdfFn = await ensureSvg2pdf();
-    } catch (e) {
-      if (renderStatus) renderStatus.textContent = "PDF-Export: svg2pdf konnte nicht geladen werden.";
       return;
     }
     var svg = paper && paper.querySelector("svg");
@@ -836,36 +911,42 @@
     }
     var { jsPDF } = window.jspdf;
     var doc = new jsPDF({ unit: "pt", format: "a4" });
-
-    // SVG duplizieren, damit wir daran style/size anpassen können
-    var clone = svg.cloneNode(true);
-    var svgWidth = parseFloat(clone.getAttribute("width")) || 800;
-    var svgHeight = parseFloat(clone.getAttribute("height")) || 400;
-    // Falls width/height fehlen, aus viewBox ableiten
-    var vb = clone.getAttribute("viewBox");
-    if (vb) {
-      var parts = vb.split(/\s+/).map(parseFloat);
-      if (parts.length === 4) {
-        svgWidth = parts[2];
-        svgHeight = parts[3];
-      }
-    }
-    // Skaliere auf A4 mit etwas Rand
+    var dims = getSvgDims(svg);
     var pageW = doc.internal.pageSize.getWidth();
     var pageH = doc.internal.pageSize.getHeight();
     var margin = 24;
-    var scale = Math.min((pageW - margin * 2) / svgWidth, (pageH - margin * 2) / svgHeight);
+    var scale = Math.min((pageW - margin * 2) / dims.w, (pageH - margin * 2) / dims.h);
     var x = margin;
     var y = margin;
 
-    svg2pdfFn(clone, doc, {
-      x: x,
-      y: y,
-      width: svgWidth * scale,
-      height: svgHeight * scale
-    });
-    doc.save("claritrans.pdf");
-    if (renderStatus) renderStatus.textContent = "PDF gespeichert.";
+    var svg2pdfFn = null;
+    try {
+      svg2pdfFn = await ensureSvg2pdf();
+    } catch (e) {
+      svg2pdfFn = null;
+    }
+
+    try {
+      if (svg2pdfFn) {
+        var clone = svg.cloneNode(true);
+        var res = svg2pdfFn(clone, doc, {
+          x: x,
+          y: y,
+          width: dims.w * scale,
+          height: dims.h * scale
+        });
+        if (res && typeof res.then === "function") await res;
+      } else {
+        var dataUrl = await svgToPngDataUrl(svg, dims.w, dims.h);
+        doc.addImage(dataUrl, "PNG", x, y, dims.w * scale, dims.h * scale);
+      }
+      doc.save("claritrans.pdf");
+      if (renderStatus) renderStatus.textContent = "PDF gespeichert.";
+    } catch (err) {
+      if (renderStatus) renderStatus.textContent = "PDF-Export fehlgeschlagen.";
+      // eslint-disable-next-line no-console
+      console.error("PDF export failed", err);
+    }
   }
 
   // Entferne den Produkt-Titel im Browser-Druckkopf: beim Drucken leerer Titel, danach zurücksetzen.
