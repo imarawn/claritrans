@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>ClariTrans (MVP)</title>
   <link rel="stylesheet" href="./style.css" />
-  <!-- abcjs via CDN -->
   <script defer src="https://cdn.jsdelivr.net/npm/abcjs@6.2.3/dist/abcjs-basic-min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js"></script>
@@ -13,191 +12,182 @@
 </head>
 <body>
   <header class="header">
-    <div class="head-row">
+    <div class="hero">
       <div>
-        <h1>ClariTrans</h1>
-        <p class="sub">Transponiere Klarinetten-Stimmen über Vorzeichen, Instrument & Notenfeld.</p>
+        <p class="eyebrow">ClariTrans</p>
+        <h1>Noten transponieren, klicken & exportieren</h1>
+        <p class="sub">Schrittweise Einstellungen treffen, dann im großen Vorschaufenster arbeiten.</p>
+        <div class="hero-actions">
+          <button id="startSetup" class="btn primary" type="button">Setup starten</button>
+          <button id="openSteps" class="btn ghost" type="button">Einstellungen öffnen</button>
+          <button id="clearSettings" class="btn danger ghost" type="button">Einstellungen löschen</button>
+        </div>
       </div>
-      <div class="head-actions">
-        <button id="menuToggle" class="btn" type="button" aria-label="Menü öffnen">☰ Menü</button>
+      <div class="hero-switch">
         <button id="themeToggle" class="btn" type="button" aria-label="Dark Mode umschalten">Dark Mode</button>
       </div>
     </div>
   </header>
-  <div id="drawerOverlay" class="drawer-overlay"></div>
 
-  <main class="layout">
-    <section class="sidebar">
-      <div class="card">
-        <h2>1) Vorzeichen</h2>
-
-        <div class="row">
-          <label>Typ</label>
-          <div class="seg">
-            <button id="accTypeSharps" class="segbtn active" type="button">Kreuze ♯</button>
-            <button id="accTypeFlats" class="segbtn" type="button">B’s ♭</button>
+  <main class="new-layout">
+    <div class="main-grid">
+      <section class="preview-pane card">
+        <div class="pane-head">
+          <div>
+            <p class="eyebrow">Vorschau</p>
+            <h2>Große Ansicht</h2>
+            <div class="note">Titel setzen, dann drucken oder als PDF speichern.</div>
           </div>
         </div>
-
-        <div class="row">
-          <label for="accCount">Anzahl</label>
-          <select id="accCount">
-            <option value="0">0</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-            <option value="7">7</option>
-          </select>
-        </div>
-
-        <div class="row">
-          <label>Modus</label>
-          <div class="seg">
-            <button id="modeMajor" class="segbtn active" type="button">Dur</button>
-            <button id="modeMinor" class="segbtn" type="button">Moll</button>
+        <div class="inline-controls">
+          <div class="row">
+            <label>Vorzeichen</label>
+            <div class="seg">
+              <button id="accTypeSharps" class="segbtn active" type="button">Kreuze ♯</button>
+              <button id="accTypeFlats" class="segbtn" type="button">B’s ♭</button>
+            </div>
+          </div>
+          <div class="row">
+            <label for="accCount">Anzahl</label>
+            <select id="accCount">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+            </select>
+          </div>
+          <div class="row">
+            <label>Modus</label>
+            <div class="seg">
+              <button id="modeMajor" class="segbtn active" type="button">Dur</button>
+              <button id="modeMinor" class="segbtn" type="button">Moll</button>
+            </div>
+          </div>
+          <div class="row">
+            <label for="instrument">Klarinetten-Typ</label>
+            <select id="instrument">
+              <option value="Bb">B-Klarinette (in B♭)</option>
+              <option value="A">A-Klarinette (in A)</option>
+              <option value="Eb">Es-Klarinette (in E♭)</option>
+            </select>
+          </div>
+          <div class="row">
+            <label for="meter">Taktart</label>
+            <select id="meter">
+              <option value="4/4">4/4</option>
+              <option value="3/4">3/4</option>
+              <option value="2/4">2/4</option>
+              <option value="3/8">3/8</option>
+              <option value="6/8">6/8</option>
+              <option value="12/8">12/8</option>
+              <option value="2/2">2/2</option>
+              <option value="5/4">5/4</option>
+              <option value="5/8">5/8</option>
+              <option value="7/8">7/8</option>
+              <option value="9/8">9/8</option>
+            </select>
           </div>
         </div>
-
-        <div class="badge-row">
-          <div class="badge">
-            <span class="badge-label">Original</span>
-            <span id="origKeyLabel" class="badge-value">C-Dur</span>
-          </div>
-        </div>
-
-        <div class="note">Originaltonart: <span id="origKeyText">C-Dur</span></div>
-      </div>
-
-      <div class="card">
-        <h2>2) Instrument</h2>
-
-        <div class="row">
-          <label for="instrument">Klarinetten-Typ</label>
-          <select id="instrument">
-            <option value="Bb">B-Klarinette (in B♭)</option>
-            <option value="A">A-Klarinette (in A)</option>
-            <option value="Eb">Es-Klarinette (in E♭)</option>
-          </select>
-        </div>
-
-        <div class="row">
-          <label for="meter">Taktart</label>
-          <select id="meter">
-            <option value="4/4">4/4</option>
-            <option value="3/4">3/4</option>
-            <option value="2/4">2/4</option>
-            <option value="3/8">3/8</option>
-            <option value="6/8">6/8</option>
-            <option value="12/8">12/8</option>
-            <option value="2/2">2/2</option>
-            <option value="5/4">5/4</option>
-            <option value="5/8">5/8</option>
-            <option value="7/8">7/8</option>
-            <option value="9/8">9/8</option>
-          </select>
-        </div>
-
-        <div class="badge-row">
-          <div class="badge accent">
-            <span class="badge-label">Notierte Tonart</span>
-            <span id="targetKeyLabel" class="badge-value">C-Dur</span>
-          </div>
-        </div>
-
-        <div class="note">
-          Konzertton rein, notierte Klarinetten-Tonart raus.
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>3) Notenfeld</h2>
-        <p class="note">Rechts findest du das klickbare Notenfeld. Töne setzen, Taktstriche oder Pausen hinzufügen und als ABC kopieren.</p>
-      </div>
-
-      <div class="card">
-        <h2>4) Layout & Verschiebung</h2>
-        <div class="row">
-          <label for="tokensPerLine">Noten pro Zeile</label>
-          <input id="tokensPerLine" class="num-input" type="number" min="0" max="64" step="1" value="16" />
-        </div>
-        <p class="note">0 = kein automatischer Zeilenumbruch.</p>
-        <div class="row">
-          <label for="pitchShift">Halbton-Verschiebung</label>
-          <input id="pitchShift" class="num-input" type="number" min="-12" max="12" step="1" value="0" />
-        </div>
-        <p class="note">Alle Noten werden um diesen Halbtonwert verschoben (vor Instrumententransposition).</p>
-      </div>
-    </section>
-
-    <section class="workspace card">
-      <div class="workspace-head">
-        <div>
-          <h2>Notenfeld & Vorschau</h2>
-          <div class="note">Ton auswählen, Oktave und Dauer setzen, dann auf die Notenfläche klicken.</div>
-        </div>
-      </div>
-
-      <div class="toolrow">
-        <div class="toolgroup staff-group">
-          <div class="label">Notenfeld (klickbar)</div>
-          <div id="pitchButtons" class="btnwrap column"></div>
-        </div>
-
-        <div class="toolgroup">
-          <div class="label">Oktave</div>
-          <div class="btnwrap">
-            <button id="octDown" class="btn" type="button">−</button>
-            <div id="octLabel" class="pill" title="C4 = Mittleres C (MIDI 60)">C4</div>
-            <button id="octUp" class="btn" type="button">+</button>
-          </div>
-        </div>
-
-        <div class="toolgroup">
-          <div class="label">Dauer</div>
-          <div class="btnwrap">
-            <button class="btn dur active" data-dur="1" type="button">♪ 1/8</button>
-            <button class="btn dur" data-dur="2" type="button">♩ 1/4</button>
-            <button class="btn dur" data-dur="4" type="button">𝅗𝅥 1/2</button>
-            <button class="btn dur" data-dur="8" type="button">𝅝 1</button>
-            <button class="btn dur" data-dur="1/2" type="button">𝅘𝅥𝅯 1/16</button>
-          </div>
-          <div class="small">L:1/8 (Standardlänge)</div>
-        </div>
-
-        <div class="toolgroup">
-          <div class="label">Aktionen</div>
-          <div class="btnwrap">
-            <button id="addRest" class="btn" type="button">Pause</button>
-            <button id="addBar" class="btn" type="button">Taktstrich |</button>
-            <button id="addNewline" class="btn" type="button">Neue Zeile</button>
-            <button id="slurStart" class="btn toggle" type="button">( Bogen Start</button>
-            <button id="slurEnd" class="btn toggle" type="button">) Bogen Ende</button>
-            <button id="undo" class="btn" type="button">Rückgängig</button>
-            <button id="clear" class="btn danger" type="button">Leeren</button>
-          </div>
-          <div class="small"><label><input type="checkbox" id="autoBars" checked /> Taktstriche automatisch</label></div>
-        </div>
-      </div>
-
-      <div class="split">
         <div class="panel">
           <div class="title-row">
             <label for="titleInput" class="label small">Stücktitel</label>
             <input id="titleInput" class="title-input" type="text" placeholder="Titel eingeben" />
           </div>
-          <div id="paper" class="paper"></div>
+          <div class="paper-wrap">
+            <div id="paper" class="paper"></div>
+            <div id="previewOverlay" class="paper-overlay">
+              <div id="previewGhost" class="ghost-note hidden">
+                <div class="ghost-dot"></div>
+                <div class="ghost-label"></div>
+              </div>
+            </div>
+          </div>
           <div id="noteNames" class="small"></div>
           <div id="renderStatus" class="small"></div>
-          <div class="btnwrap">
-            <button id="print" class="btn" type="button">Drucken</button>
-            <button id="savePdf" class="btn" type="button">Als PDF speichern</button>
+          <div class="btnwrap space-between">
+            <div class="btnwrap">
+              <button id="print" class="btn" type="button">Drucken</button>
+              <button id="savePdf" class="btn" type="button">Als PDF speichern</button>
+            </div>
+            <div class="shift-controls">
+              <span class="label small">Halbtöne</span>
+              <div class="btnwrap">
+                <button id="shiftDown" class="btn sm" type="button">−</button>
+                <div id="shiftLabel" class="pill">0</div>
+                <button id="shiftUp" class="btn sm" type="button">+</button>
+              </div>
+            </div>
           </div>
         </div>
+      </section>
+
+      <section class="control-pane card">
+        <div class="pane-head">
+          <div>
+            <p class="eyebrow">Eingabe</p>
+            <h2>Klickbares Notenfeld</h2>
+            <div class="note">Ton wählen, Oktave/Dauer setzen und auf das Feld klicken.</div>
+          </div>
+        </div>
+
+        <div class="toolrow">
+          <div class="toolgroup staff-group">
+            <div class="label">Notenfeld (klickbar)</div>
+            <div id="pitchButtons" class="btnwrap column"></div>
+          </div>
+
+          <div class="toolgroup">
+            <div class="label">Oktave</div>
+            <div class="btnwrap">
+              <button id="octDown" class="btn" type="button">−</button>
+              <div id="octLabel" class="pill" title="C4 = Mittleres C (MIDI 60)">C4</div>
+              <button id="octUp" class="btn" type="button">+</button>
+            </div>
+          </div>
+
+          <div class="toolgroup">
+            <div class="label">Dauer</div>
+            <div class="btnwrap">
+              <button class="btn dur active" data-dur="1" type="button">♪ 1/8</button>
+              <button class="btn dur" data-dur="2" type="button">♩ 1/4</button>
+              <button class="btn dur" data-dur="4" type="button">𝅗𝅥 1/2</button>
+              <button class="btn dur" data-dur="8" type="button">𝅝 1</button>
+              <button class="btn dur" data-dur="1/2" type="button">𝅘𝅥𝅯 1/16</button>
+            </div>
+            <div class="small">L:1/8 (Standardlänge)</div>
+          </div>
+
+          <div class="toolgroup">
+            <div class="label">Aktionen</div>
+            <div class="btnwrap">
+              <button id="addRest" class="btn" type="button">Pause</button>
+              <button id="addBar" class="btn" type="button">Taktstrich |</button>
+              <button id="addNewline" class="btn" type="button">Neue Zeile</button>
+              <button id="slurStart" class="btn toggle" type="button">( Bogen Start</button>
+              <button id="slurEnd" class="btn toggle" type="button">) Bogen Ende</button>
+              <button id="undo" class="btn" type="button">Rückgängig</button>
+              <button id="clear" class="btn danger" type="button">Leeren</button>
+            </div>
+            <div class="small"><label><input type="checkbox" id="autoBars" checked /> Taktstriche automatisch</label></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div id="stepModal" class="modal">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content">
+        <button id="stepModalClose" class="btn close-btn" type="button">✕</button>
+        <div id="stepModalBody"></div>
+        <div id="stepModalFooter" class="modal-footer"></div>
       </div>
-    </section>
+    </div>
   </main>
+
+  <section class="sidebar hidden"></section>
 </body>
 </html>

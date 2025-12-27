@@ -155,6 +155,15 @@
     return x;
   }
 
+  function noteNameForMidi(midi, useSharps) {
+    var pc = ((midi % 12) + 12) % 12;
+    var octave = Math.floor(midi / 12) - 1;
+    var namesSharp = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","H"];
+    var namesFlat  = ["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B","H"];
+    var name = (useSharps ? namesSharp : namesFlat)[pc];
+    return name + octave;
+  }
+
   // --- State ---
   var state = {
     accType: "sharps",  // "sharps" | "flats"
@@ -176,6 +185,110 @@
     // Selected duration (in eighths). 1=1/8, 2=1/4, 4=1/2, 8=whole, 0.5=1/16
     dur: 1
   };
+  var SETTINGS_KEY = "claritrans-settings";
+  var SETUP_DONE_KEY = "claritrans-setup-done";
+  var guidedActive = false;
+  var guidedIndex = 1;
+  var hoverState = { midi: null, y: 0 };
+
+  var overlayPitches = (function(){
+    var naturalPcs = [0,2,4,5,7,9,11];
+    var minMidi = 55, maxMidi = 83;
+    var arr = [];
+    for (var m = minMidi; m <= maxMidi; m++) {
+      var pc = ((m % 12) + 12) % 12;
+      if (naturalPcs.indexOf(pc) !== -1) arr.push(m);
+    }
+    return arr;
+  })();
+
+  function overlayMidiFromY(y, height) {
+    if (!height || height <= 0) return 60;
+    var slots = overlayPitches.length;
+    var frac = y / height;
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    var idx = Math.round(frac * (slots - 1));
+    var base = overlayPitches[slots - 1 - idx]; // top = hohe Note
+    var shift = (state.octave - 4) * 12;
+    return base + shift + (accidental || 0);
+  }
+
+  function showGhost(y, midi) {
+    if (!previewGhost) return;
+    previewGhost.style.top = y + "px";
+    previewGhost.style.left = "20px";
+    hoverState.midi = midi;
+    hoverState.y = y;
+    if (previewGhostLabel) {
+      var useSharps = prefersSharps(state.accType, state.accCount);
+      previewGhostLabel.textContent = noteNameForMidi(midi, useSharps);
+    }
+    previewGhost.classList.remove("hidden");
+  }
+
+  function hideGhost() {
+    if (previewGhost) previewGhost.classList.add("hidden");
+    hoverState.midi = null;
+  }
+
+  function saveSettingsToStorage() {
+    try {
+      var data = {
+        accType: state.accType,
+        accCount: state.accCount,
+        mode: state.mode,
+        meter: state.meter,
+        instrument: state.instrument,
+        tokensPerLine: state.tokensPerLine,
+        pitchShift: state.pitchShift,
+        title: state.title
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function applySettings(obj) {
+    if (!obj || typeof obj !== "object") return;
+    state.accType = obj.accType || state.accType;
+    state.accCount = clampInt(obj.accCount, 0, 7);
+    state.mode = obj.mode === "minor" ? "minor" : "major";
+    state.meter = obj.meter || state.meter;
+    state.instrument = obj.instrument || state.instrument;
+    state.tokensPerLine = clampInt(obj.tokensPerLine, 0, 64);
+    state.pitchShift = Math.max(-12, Math.min(12, obj.pitchShift || 0));
+    state.title = obj.title || "";
+    if (accTypeSharps && accTypeFlats) {
+      setSegActive(state.accType === "sharps" ? accTypeSharps : accTypeFlats, state.accType === "sharps" ? accTypeFlats : accTypeSharps);
+    }
+    if (accCount) accCount.value = String(state.accCount);
+    if (modeMajor && modeMinor) setSegActive(state.mode === "major" ? modeMajor : modeMinor, state.mode === "major" ? modeMinor : modeMajor);
+    if (meter) meter.value = state.meter;
+    if (instrument) instrument.value = state.instrument;
+    if (tokensPerLine) tokensPerLine.value = state.tokensPerLine;
+    if (pitchShift) pitchShift.value = state.pitchShift;
+    if (shiftLabel) shiftLabel.textContent = state.pitchShift;
+    if (titleInput) titleInput.value = state.title;
+  }
+
+  function loadSettingsFromStorage() {
+    try {
+      var raw = localStorage.getItem(SETTINGS_KEY);
+      if (!raw) return false;
+      var parsed = JSON.parse(raw);
+      applySettings(parsed);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function clearSettingsStorage() {
+    try { localStorage.removeItem(SETTINGS_KEY); } catch (e) {}
+  }
 
   // --- DOM ---
   var $ = function (id) { return document.getElementById(id); };
@@ -214,10 +327,30 @@
   var targetKeyLabel= $("targetKeyLabel");
   var printBtn      = $("print");
   var savePdfBtn    = $("savePdf");
+  var shiftDownBtn  = $("shiftDown");
+  var shiftUpBtn    = $("shiftUp");
+  var shiftLabel    = $("shiftLabel");
   var titleInput    = $("titleInput");
   var themeToggle   = $("themeToggle");
-  var menuToggle    = $("menuToggle");
-  var drawerOverlay = $("drawerOverlay");
+  var menuToggle    = $("menuToggle"); // optional (may be absent)
+  var drawerOverlay = $("drawerOverlay"); // optional (may be absent)
+  var clearSettingsBtn = $("clearSettings");
+  var startSetupBtn = $("startSetup");
+  var openStepsBtn  = $("openSteps");
+  var sidebarEl     = document.querySelector(".sidebar");
+  var previewOverlay= $("previewOverlay");
+  var previewGhost  = $("previewGhost");
+  var previewGhostLabel = previewGhost ? previewGhost.querySelector(".ghost-label") : null;
+  var stepBtns      = {
+    1: $("step1Btn"),
+    2: $("step2Btn"),
+    3: $("step3Btn"),
+    4: $("step4Btn")
+  };
+  var stepModal     = $("stepModal");
+  var stepModalBody = $("stepModalBody");
+  var stepModalClose= $("stepModalClose");
+  var stepModalFooter= $("stepModalFooter");
 
   // Build staff + chromatic accidentals via modifiers
   // Accidental applies to the next placed pitch.
@@ -421,8 +554,7 @@
     root.appendChild(svg);
   }
 
-  function addStaffNote(baseMidi) {
-    var midi = baseMidi + (accidental || 0);
+  function pushNote(midi) {
     state.tokens.push({
       kind: "note",
       midi: midi,
@@ -430,12 +562,17 @@
       slurStart: state.slurStartNext,
       slurEnd: state.slurEndNext
     });
-    accidental = 0;
     state.slurStartNext = false;
     state.slurEndNext = false;
     updateSlurButtons();
-    setAccToggles();
     sync();
+  }
+
+  function addStaffNote(baseMidi) {
+    var midi = baseMidi + (accidental || 0);
+    pushNote(midi);
+    accidental = 0;
+    setAccToggles();
   }
 
   function addRestToken() {
@@ -690,6 +827,133 @@
     });
     pitchShift.value = state.pitchShift;
   }
+  if (shiftDownBtn && shiftUpBtn && shiftLabel) {
+    function applyShift(delta) {
+      var next = Math.max(-12, Math.min(12, state.pitchShift + delta));
+      state.pitchShift = next;
+      if (pitchShift) pitchShift.value = next;
+      shiftLabel.textContent = next;
+      sync();
+    }
+    bindTouchClick(shiftDownBtn, function () { applyShift(-1); });
+    bindTouchClick(shiftUpBtn, function () { applyShift(1); });
+    shiftLabel.textContent = state.pitchShift;
+  }
+
+  if (previewOverlay) {
+    previewOverlay.addEventListener("mousemove", function (e) {
+      var rect = previewOverlay.getBoundingClientRect();
+      var y = e.clientY - rect.top;
+      var midi = overlayMidiFromY(y, rect.height);
+      showGhost(y, midi);
+    });
+    previewOverlay.addEventListener("mouseleave", hideGhost);
+    previewOverlay.addEventListener("click", function (e) {
+      var rect = previewOverlay.getBoundingClientRect();
+      var y = e.clientY - rect.top;
+      var midi = overlayMidiFromY(y, rect.height);
+      pushNote(midi);
+      accidental = 0;
+      setAccToggles();
+    });
+  }
+
+  function markSetupDone() {
+    try { localStorage.setItem(SETUP_DONE_KEY, "yes"); } catch (e) {}
+  }
+  function shouldRunSetup() {
+    try { return !localStorage.getItem(SETUP_DONE_KEY); } catch (e) { return true; }
+  }
+
+  function openSavePrompt() {
+    guidedActive = false;
+    if (!stepModal || !stepModalBody) return;
+    returnModalContentToSidebar();
+    stepModalBody.innerHTML = "";
+    var msg = document.createElement("div");
+    var title = document.createElement("h3");
+    title.textContent = "Einstellungen speichern?";
+    var info = document.createElement("p");
+    info.className = "note";
+    info.textContent = "Speichere im Browser (localStorage), damit die gleichen Einstellungen beim nächsten Laden bereitstehen. Sie bleiben nur auf diesem Gerät/Browser.";
+    msg.appendChild(title);
+    msg.appendChild(info);
+    stepModalBody.appendChild(msg);
+    if (stepModalFooter) {
+      stepModalFooter.innerHTML = "";
+      var saveBtn = document.createElement("button");
+      saveBtn.className = "btn";
+      saveBtn.textContent = "Einstellungen speichern";
+      saveBtn.addEventListener("click", function () {
+        saveSettingsToStorage();
+        markSetupDone();
+        closeStepModal();
+      });
+      var skipBtn = document.createElement("button");
+      skipBtn.className = "btn danger";
+      skipBtn.textContent = "Nicht speichern";
+      skipBtn.addEventListener("click", function () {
+        clearSettingsStorage();
+        markSetupDone();
+        closeStepModal();
+      });
+      stepModalFooter.appendChild(skipBtn);
+      stepModalFooter.appendChild(saveBtn);
+    }
+    stepModal.classList.add("open");
+  }
+
+  function renderGuidedFooter() {
+    if (!stepModalFooter) return;
+    stepModalFooter.innerHTML = "";
+    if (!guidedActive) return;
+    var info = document.createElement("span");
+    info.className = "small";
+    info.textContent = "Schritt " + guidedIndex + " von 4";
+    var nextBtn = document.createElement("button");
+    nextBtn.className = "btn";
+    nextBtn.textContent = guidedIndex >= 4 ? "Weiter" : "Weiter";
+    nextBtn.addEventListener("click", function () {
+      guidedIndex += 1;
+      if (guidedIndex > 4) {
+        openSavePrompt();
+      } else {
+        openStepModal(String(guidedIndex));
+        renderGuidedFooter();
+      }
+    });
+    var cancelBtn = document.createElement("button");
+    cancelBtn.className = "btn danger";
+    cancelBtn.textContent = "Setup abbrechen";
+    cancelBtn.addEventListener("click", function () {
+      guidedActive = false;
+      closeStepModal();
+    });
+    stepModalFooter.appendChild(cancelBtn);
+    stepModalFooter.appendChild(info);
+    stepModalFooter.appendChild(nextBtn);
+  }
+
+  function startGuidedSetup() {
+    guidedActive = true;
+    guidedIndex = 1;
+    openStepModal("1");
+    renderGuidedFooter();
+  }
+  if (startSetupBtn) {
+    bindTouchClick(startSetupBtn, function () {
+      guidedActive = true;
+      guidedIndex = 1;
+      openStepModal("1");
+      renderGuidedFooter();
+    });
+  }
+  if (openStepsBtn) {
+    bindTouchClick(openStepsBtn, function () {
+      guidedActive = false;
+      openStepModal("1");
+    });
+  }
 
   // Duration buttons
   function setDurActive(targetBtn) {
@@ -799,8 +1063,7 @@
 
   // Drawer (Burger-Menü) für die Sidebar
   function setDrawer(open) {
-    document.body.classList.toggle("drawer-open", open);
-    document.body.classList.toggle("drawer-closed", !open);
+    document.body.classList.toggle("menu-open", open);
     if (menuToggle) {
       menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
       menuToggle.textContent = open ? "✕ Schließen" : "☰ Menü";
@@ -808,17 +1071,73 @@
   }
   if (menuToggle) {
     bindTouchClick(menuToggle, function () {
-      var next = !document.body.classList.contains("drawer-open");
+      var next = !document.body.classList.contains("menu-open");
       setDrawer(next);
     });
   }
   if (drawerOverlay) {
     bindTouchClick(drawerOverlay, function () { setDrawer(false); });
   }
+  if (clearSettingsBtn) {
+    bindTouchClick(clearSettingsBtn, function () {
+      clearSettingsStorage();
+      try { localStorage.removeItem(SETUP_DONE_KEY); } catch (e) {}
+      if (renderStatus) renderStatus.textContent = "Gespeicherte Einstellungen gelöscht.";
+    });
+  }
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") setDrawer(false);
   });
   setDrawer(false);
+
+  // Step modals (ersetzen Sidebar-Steuerungen durch Popups)
+  var stepCards = {};
+  var sidebarCards = document.querySelectorAll(".sidebar .card");
+  for (var si = 0; si < sidebarCards.length; si++) {
+    var card = sidebarCards[si];
+    var stepId = card.getAttribute("data-step") || String(si + 1);
+    stepCards[stepId] = card;
+  }
+  function returnModalContentToSidebar() {
+    if (!sidebarEl || !stepModalBody) return;
+    var child = stepModalBody.firstChild;
+    if (child && Object.values(stepCards).indexOf(child) !== -1) {
+      sidebarEl.appendChild(child);
+    }
+    stepModalBody.innerHTML = "";
+  }
+  function renderModalFooter(content) {
+    if (!stepModalFooter) return;
+    stepModalFooter.innerHTML = "";
+    if (content) stepModalFooter.appendChild(content);
+  }
+  function closeStepModal() {
+    renderModalFooter(null);
+    returnModalContentToSidebar();
+    if (stepModal) stepModal.classList.remove("open");
+  }
+  function openStepModal(step) {
+    if (!stepModal || !stepModalBody) return;
+    returnModalContentToSidebar();
+    var content = stepCards[step];
+    if (content) {
+      stepModalBody.appendChild(content);
+    } else {
+      stepModalBody.textContent = "Keine Inhalte für diesen Schritt.";
+    }
+    stepModal.classList.add("open");
+    if (!guidedActive) renderModalFooter(null); else renderGuidedFooter();
+  }
+  if (stepModalClose) bindTouchClick(stepModalClose, closeStepModal);
+  if (stepModal) {
+    var backdrop = stepModal.querySelector(".modal-backdrop");
+    if (backdrop) bindTouchClick(backdrop, closeStepModal);
+  }
+  Object.keys(stepBtns).forEach(function (k) {
+    if (stepBtns[k]) {
+      bindTouchClick(stepBtns[k], function () { openStepModal(k); });
+    }
+  });
 
   // Export als PDF direkt aus dem gerenderten SVG (mobil-freundlicher als window.print)
   // Try to resolve svg2pdf from various UMD shapes
@@ -963,6 +1282,10 @@
   })();
 
   // Init
+  var settingsLoaded = loadSettingsFromStorage();
   buildPitchUI();
   sync();
+  if (!settingsLoaded && shouldRunSetup()) {
+    startGuidedSetup();
+  }
 })();
