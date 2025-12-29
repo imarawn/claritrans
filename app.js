@@ -1,1291 +1,249 @@
 (function () {
   "use strict";
 
-  // --- Key signature lookup (from number of sharps/flats) ---
-  // We keep a simple, deterministic mapping. Users can toggle Dur/Moll.
-  var KEYS_MAJOR_SHARPS = ["C", "G", "D", "A", "E", "B", "F#", "C#"];
-  var KEYS_MAJOR_FLATS  = ["C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb"];
-  var KEYS_MINOR_SHARPS = ["Am", "Em", "Bm", "F#m", "C#m", "G#m", "D#m", "A#m"];
-  var KEYS_MINOR_FLATS  = ["Am", "Dm", "Gm", "Cm", "Fm", "Bbm", "Ebm", "Abm"];
-
-  var KEY_PC = {
-    C:0, "B#":0,
-    "C#":1, Db:1,
-    D:2,
-    "D#":3, Eb:3,
-    E:4, Fb:4,
-    F:5, "E#":5,
-    "F#":6, Gb:6,
-    G:7,
-    "G#":8, Ab:8,
-    A:9,
-    "A#":10, Bb:10,
-    B:11, H:11, Cb:11
-  };
-
+  var KEYS_MAJOR_SHARPS = ["C","G","D","A","E","B","F#","C#"];
+  var KEYS_MAJOR_FLATS  = ["C","F","Bb","Eb","Ab","Db","Gb","Cb"];
+  var KEYS_MINOR_SHARPS = ["Am","Em","Bm","F#m","C#m","G#m","D#m","A#m"];
+  var KEYS_MINOR_FLATS  = ["Am","Dm","Gm","Cm","Fm","Bbm","Ebm","Abm"];
+  var KEY_PC = { C:0,"B#":0,"C#":1,Db:1,D:2,"D#":3,Eb:3,E:4,Fb:4,F:5,"E#":5,"F#":6,Gb:6,G:7,"G#":8,Ab:8,A:9,"A#":10,Bb:10,B:11,H:11,Cb:11 };
   var KEY_NAMES_SHARP = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
   var KEY_NAMES_FLAT  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","Cb"];
 
-  // Prefer sharps for sharp keys, flats for flat keys; C/Am default to sharps.
-  function prefersSharps(accType, accCount) {
-    if (accType === "flats" && accCount > 0) return false;
-    return true;
+  function prefersSharps(accType, accCount){ return !(accType==="flats" && accCount>0); }
+  function keyFromSignature(accType, accCount, mode){
+    var n=clamp(accCount,0,7), isMajor=mode==="major";
+    return accType==="sharps" ? (isMajor?KEYS_MAJOR_SHARPS[n]:KEYS_MINOR_SHARPS[n]) : (isMajor?KEYS_MAJOR_FLATS[n]:KEYS_MINOR_FLATS[n]);
   }
+  function keyToPc(keyName){ var root=keyName&&keyName.endsWith("m")?keyName.slice(0,-1):keyName; return KEY_PC.hasOwnProperty(root)?KEY_PC[root]:0; }
+  function pcToKeyName(pc,isMinor,preferSharps){ var names=preferSharps?KEY_NAMES_SHARP:KEY_NAMES_FLAT, root=names[((pc%12)+12)%12]; return isMinor?root+"m":root; }
+  function germanizeKeyName(keyName){ var isMinor=keyName&&keyName.endsWith("m"), root=isMinor?keyName.slice(0,-1):keyName, mapped=root==="B"?"H":(root==="Bb"?"B":root); return isMinor?mapped+"m":mapped; }
+  function describeKeyName(keyName){ var display=germanizeKeyName(keyName), isMinor=display&&display.endsWith("m"), root=isMinor?display.slice(0,-1):display; return root+(isMinor?"-Moll":"-Dur"); }
+  function transposeSemis(instr){ if(instr==="Bb") return 2; if(instr==="A") return 3; if(instr==="Eb") return -3; return 0; }
+  function durToAbc(d){ if(d===1)return""; if(d===2)return"2"; if(d===4)return"4"; if(d===8)return"8"; if(d===0.5)return"/"; return""; }
+  function pcToAbcName(pc,useSharps){ var s=["C","^C","D","^D","E","F","^F","G","^G","A","^A","B"], f=["C","_D","D","_E","E","F","_G","G","_A","A","_B","B"]; return (useSharps?s:f)[pc%12]; }
+  function midiToAbc(m,useSharps){ var pc=((m%12)+12)%12, oct=Math.floor(m/12)-1, name=pcToAbcName(pc,useSharps), acc="", letter=name; if(name[0]==="^"||name[0]==="_"){acc=name[0];letter=name.slice(1);} var out=oct>=5?letter.toLowerCase():letter.toUpperCase(), marks=""; if(oct>5) marks=repeat("'",oct-5); else if(oct<4) marks=repeat(",",4-oct); return acc+out+marks; }
+  function repeat(ch,n){ var s=""; for(var i=0;i<n;i++) s+=ch; return s; }
+  function clamp(v,min,max){ var x=parseInt(v,10); if(isNaN(x)) x=min; if(x<min)x=min; if(x>max)x=max; return x; }
 
-  function keyFromSignature(accType, accCount, mode) {
-    var n = clampInt(accCount, 0, 7);
-    var isMajor = mode === "major";
-    if (accType === "sharps") return isMajor ? KEYS_MAJOR_SHARPS[n] : KEYS_MINOR_SHARPS[n];
-    return isMajor ? KEYS_MAJOR_FLATS[n] : KEYS_MINOR_FLATS[n];
-  }
-
-  function keyToPc(keyName) {
-    var root = keyName && keyName.endsWith("m") ? keyName.slice(0, -1) : keyName;
-    if (root && KEY_PC.hasOwnProperty(root)) return KEY_PC[root];
-    return 0;
-  }
-
-  function pcToKeyName(pc, isMinor, preferSharps) {
-    var names = preferSharps ? KEY_NAMES_SHARP : KEY_NAMES_FLAT;
-    var safePc = ((pc % 12) + 12) % 12;
-    var root = names[safePc];
-    return isMinor ? root + "m" : root;
-  }
-
-  function germanizeKeyName(keyName) {
-    var isMinor = keyName && keyName.endsWith("m");
-    var root = isMinor ? keyName.slice(0, -1) : keyName;
-    var mapped = root;
-    if (root === "B") mapped = "H";     // B natural -> H
-    else if (root === "Bb") mapped = "B"; // Bb -> B (deutsch)
-    return isMinor ? mapped + "m" : mapped;
-  }
-
-  function describeKeyName(keyName) {
-    var displayName = germanizeKeyName(keyName);
-    var isMinor = displayName && displayName.endsWith("m");
-    var root = isMinor ? displayName.slice(0, -1) : displayName;
-    return root + (isMinor ? "-Moll" : "-Dur");
-  }
-
-  // --- Instrument transposition (input = concert pitch; output = written clarinet part) ---
-  // Bb clarinet sounds a major 2nd LOWER than written => written = concert + M2
-  // A  clarinet sounds a minor 3rd LOWER than written => written = concert + m3
-  // Eb clarinet sounds a minor 3rd HIGHER than written => written = concert - m3
-  function transposeSemitonesForInstrument(instr) {
-    if (instr === "Bb") return 2;
-    if (instr === "A") return 3;
-    if (instr === "Eb") return -3;
-    return 0;
-  }
-
-  // --- ABC helpers ---
-  // We use L:1/8 for simplicity. Durations are in "eighths".
-  function durToAbc(dur) {
-    // dur can be 1,2,4,8 or 0.5 (sixteenth)
-    if (dur === 1) return "";     // 1 * (1/8) => omit
-    if (dur === 2) return "2";    // 1/4
-    if (dur === 4) return "4";    // 1/2
-    if (dur === 8) return "8";    // whole (in 4/4)
-    if (dur === 0.5) return "/";  // 1/16
-    return "";
-  }
-
-  // Map pitch class to ABC accidental + note name with sharp/flat preference.
-  // We output explicit accidentals ( ^, _ ) for black keys.
-  function pcToAbcName(pc, useSharps) {
-    var sharpNames = ["C", "^C", "D", "^D", "E", "F", "^F", "G", "^G", "A", "^A", "B"];
-    var flatNames  = ["C", "_D", "D", "_E", "E", "F", "_G", "G", "_A", "A", "_B", "B"];
-    return (useSharps ? sharpNames : flatNames)[pc % 12];
-  }
-
-  // MIDI -> ABC note token (no duration)
-  // MIDI 60 = middle C => "C"
-  function midiToAbc(midi, useSharps) {
-    var m = Math.round(midi);
-    var pc = ((m % 12) + 12) % 12;
-    var octave = Math.floor(m / 12) - 1; // MIDI standard: 60 -> 4
-
-    var name = pcToAbcName(pc, useSharps); // includes ^ or _
-    // Base letter without accidentals, but accidental prefix stays with case changes.
-    // For octave mapping:
-    // octave 4 => uppercase (C..B)
-    // octave 5 => lowercase (c..b)
-    // >5 => lowercase + apostrophes
-    // <4 => uppercase + commas
-    var accPrefix = "";
-    var letter = name;
-
-    if (name[0] === "^" || name[0] === "_") {
-      accPrefix = name[0];
-      letter = name.slice(1);
-    }
-
-    var isLower = false;
-    var outLetter = letter;
-
-    if (octave >= 5) {
-      isLower = true;
-      outLetter = letter.toLowerCase();
-    } else {
-      outLetter = letter.toUpperCase();
-    }
-
-    var marks = "";
-    if (octave > 5) {
-      marks = repeat("'", octave - 5);
-    } else if (octave < 4) {
-      marks = repeat(",", 4 - octave);
-    }
-
-    return accPrefix + outLetter + marks;
-  }
-
-  function repeat(ch, n) {
-    var s = "";
-    for (var i = 0; i < n; i++) s += ch;
-    return s;
-  }
-
-  function clampInt(v, min, max) {
-    var x = parseInt(v, 10);
-    if (isNaN(x)) x = min;
-    if (x < min) x = min;
-    if (x > max) x = max;
-    return x;
-  }
-
-  function noteNameForMidi(midi, useSharps) {
-    var pc = ((midi % 12) + 12) % 12;
-    var octave = Math.floor(midi / 12) - 1;
-    var namesSharp = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","H"];
-    var namesFlat  = ["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B","H"];
-    var name = (useSharps ? namesSharp : namesFlat)[pc];
-    return name + octave;
-  }
-
-  // --- State ---
-  var state = {
-    accType: "sharps",  // "sharps" | "flats"
-    accCount: 0,
-    mode: "major",      // "major" | "minor"
-    meter: "4/4",
-    instrument: "Bb",
-    title: "",
-    autoBars: true,
-    tokensPerLine: 16,
-    pitchShift: 0,
-    slurStartNext: false,
-    slurEndNext: false,
-    // Note entry as concert MIDI numbers + duration in eighths
-    // tokens: { kind:"note", midi:60, dur:2 } | { kind:"rest", dur:2 } | { kind:"bar" }
-    tokens: [],
-    // Octave selector: stored as octave number (MIDI octave, where 4 is middle C octave)
-    octave: 4,
-    // Selected duration (in eighths). 1=1/8, 2=1/4, 4=1/2, 8=whole, 0.5=1/16
-    dur: 1
+  var state={
+    accType:"sharps", accCount:0, mode:"major", meter:"4/4", instrument:"Bb",
+    title:"", autoBars:true, tokensPerLine:16, pitchShift:0,
+    slurStartNext:false, slurEndNext:false, tokens:[], octave:4, dur:1
   };
-  var SETTINGS_KEY = "claritrans-settings";
-  var SETUP_DONE_KEY = "claritrans-setup-done";
-  var guidedActive = false;
-  var guidedIndex = 1;
-  var hoverState = { midi: null, y: 0 };
 
-  var overlayPitches = (function(){
-    var naturalPcs = [0,2,4,5,7,9,11];
-    var minMidi = 55, maxMidi = 83;
-    var arr = [];
-    for (var m = minMidi; m <= maxMidi; m++) {
-      var pc = ((m % 12) + 12) % 12;
-      if (naturalPcs.indexOf(pc) !== -1) arr.push(m);
-    }
-    return arr;
-  })();
+  var $=function(id){return document.getElementById(id);};
+  var accTypeSharps=$("accTypeSharps"), accTypeFlats=$("accTypeFlats"), accCount=$("accCount"), modeMajor=$("modeMajor"), modeMinor=$("modeMinor"), meter=$("meter"), instrument=$("instrument"), tokensPerLine=$("tokensPerLine"), pitchShift=$("pitchShift");
+  var pitchButtons=$("pitchButtons"), pitchButtonsSticky=$("pitchButtonsSticky"), octDown=$("octDown"), octUp=$("octUp"), octLabel=$("octLabel");
+  var addRest=$("addRest"), addBar=$("addBar"), addNewline=$("addNewline"), slurStartBtn=$("slurStart"), slurEndBtn=$("slurEnd"), undo=$("undo"), clearBtn=$("clear");
+  var paper=$("paper"), renderStatus=$("renderStatus"), noteNamesEl=$("noteNames"), origKeyText=$("origKeyText"), targetKeyLabel=$("targetKeyLabel"), printBtn=$("print"), savePdfBtn=$("savePdf"), titleInput=$("titleInput");
+  var shiftDownBtn=$("shiftDown"), shiftUpBtn=$("shiftUp"), shiftLabel=$("shiftLabel");
+  var themeToggle=$("themeToggle"), dockToggle=$("dockToggle");
+  var actionsTab=$("actionsTab"), actionsPanel=$("actionsPanel");
+  var accidental=0, staffOctDown, staffOctUp;
 
-  function overlayMidiFromY(y, height) {
-    if (!height || height <= 0) return 60;
-    var slots = overlayPitches.length;
-    var frac = y / height;
-    if (frac < 0) frac = 0;
-    if (frac > 1) frac = 1;
-    var idx = Math.round(frac * (slots - 1));
-    var base = overlayPitches[slots - 1 - idx]; // top = hohe Note
-    var shift = (state.octave - 4) * 12;
-    return base + shift + (accidental || 0);
-  }
+  function makeButton(label, onClick, className){ var b=document.createElement("button"); b.type="button"; b.className=className||"btn"; b.textContent=label; b.addEventListener("click",onClick); return b; }
 
-  function showGhost(y, midi) {
-    if (!previewGhost) return;
-    previewGhost.style.top = y + "px";
-    previewGhost.style.left = "20px";
-    hoverState.midi = midi;
-    hoverState.y = y;
-    if (previewGhostLabel) {
-      var useSharps = prefersSharps(state.accType, state.accCount);
-      previewGhostLabel.textContent = noteNameForMidi(midi, useSharps);
-    }
-    previewGhost.classList.remove("hidden");
-  }
-
-  function hideGhost() {
-    if (previewGhost) previewGhost.classList.add("hidden");
-    hoverState.midi = null;
-  }
-
-  function saveSettingsToStorage() {
-    try {
-      var data = {
-        accType: state.accType,
-        accCount: state.accCount,
-        mode: state.mode,
-        meter: state.meter,
-        instrument: state.instrument,
-        tokensPerLine: state.tokensPerLine,
-        pitchShift: state.pitchShift,
-        title: state.title
-      };
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(data));
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function applySettings(obj) {
-    if (!obj || typeof obj !== "object") return;
-    state.accType = obj.accType || state.accType;
-    state.accCount = clampInt(obj.accCount, 0, 7);
-    state.mode = obj.mode === "minor" ? "minor" : "major";
-    state.meter = obj.meter || state.meter;
-    state.instrument = obj.instrument || state.instrument;
-    state.tokensPerLine = clampInt(obj.tokensPerLine, 0, 64);
-    state.pitchShift = Math.max(-12, Math.min(12, obj.pitchShift || 0));
-    state.title = obj.title || "";
-    if (accTypeSharps && accTypeFlats) {
-      setSegActive(state.accType === "sharps" ? accTypeSharps : accTypeFlats, state.accType === "sharps" ? accTypeFlats : accTypeSharps);
-    }
-    if (accCount) accCount.value = String(state.accCount);
-    if (modeMajor && modeMinor) setSegActive(state.mode === "major" ? modeMajor : modeMinor, state.mode === "major" ? modeMinor : modeMajor);
-    if (meter) meter.value = state.meter;
-    if (instrument) instrument.value = state.instrument;
-    if (tokensPerLine) tokensPerLine.value = state.tokensPerLine;
-    if (pitchShift) pitchShift.value = state.pitchShift;
-    if (shiftLabel) shiftLabel.textContent = state.pitchShift;
-    if (titleInput) titleInput.value = state.title;
-  }
-
-  function loadSettingsFromStorage() {
-    try {
-      var raw = localStorage.getItem(SETTINGS_KEY);
-      if (!raw) return false;
-      var parsed = JSON.parse(raw);
-      applySettings(parsed);
-      return true;
-    } catch (e) {
-      return false;
-    }
-  }
-
-  function clearSettingsStorage() {
-    try { localStorage.removeItem(SETTINGS_KEY); } catch (e) {}
-  }
-
-  // --- DOM ---
-  var $ = function (id) { return document.getElementById(id); };
-
-  var accTypeSharps = $("accTypeSharps");
-  var accTypeFlats  = $("accTypeFlats");
-  var accCount      = $("accCount");
-  var modeMajor     = $("modeMajor");
-  var modeMinor     = $("modeMinor");
-  var meter         = $("meter");
-  var instrument    = $("instrument");
-  var tokensPerLine = $("tokensPerLine");
-  var pitchShift    = $("pitchShift");
-
-  var pitchButtons  = $("pitchButtons");
-  var octDown       = $("octDown");
-  var octUp         = $("octUp");
-  var octLabel      = $("octLabel");
-  var staffOctDown;
-  var staffOctUp;
-
-  var addRest       = $("addRest");
-  var addBar        = $("addBar");
-  var addNewline    = $("addNewline");
-  var slurStartBtn  = $("slurStart");
-  var slurEndBtn    = $("slurEnd");
-  var undo          = $("undo");
-  var clearBtn      = $("clear");
-  var autoBars      = $("autoBars");
-
-  var paper         = $("paper");
-  var renderStatus  = $("renderStatus");
-  var noteNamesEl   = $("noteNames");
-  var origKeyLabel  = $("origKeyLabel");
-  var origKeyText   = $("origKeyText");
-  var targetKeyLabel= $("targetKeyLabel");
-  var printBtn      = $("print");
-  var savePdfBtn    = $("savePdf");
-  var shiftDownBtn  = $("shiftDown");
-  var shiftUpBtn    = $("shiftUp");
-  var shiftLabel    = $("shiftLabel");
-  var titleInput    = $("titleInput");
-  var themeToggle   = $("themeToggle");
-  var menuToggle    = $("menuToggle"); // optional (may be absent)
-  var drawerOverlay = $("drawerOverlay"); // optional (may be absent)
-  var clearSettingsBtn = $("clearSettings");
-  var startSetupBtn = $("startSetup");
-  var openStepsBtn  = $("openSteps");
-  var sidebarEl     = document.querySelector(".sidebar");
-  var previewOverlay= $("previewOverlay");
-  var previewGhost  = $("previewGhost");
-  var previewGhostLabel = previewGhost ? previewGhost.querySelector(".ghost-label") : null;
-  var stepBtns      = {
-    1: $("step1Btn"),
-    2: $("step2Btn"),
-    3: $("step3Btn"),
-    4: $("step4Btn")
-  };
-  var stepModal     = $("stepModal");
-  var stepModalBody = $("stepModalBody");
-  var stepModalClose= $("stepModalClose");
-  var stepModalFooter= $("stepModalFooter");
-
-  // Build staff + chromatic accidentals via modifiers
-  // Accidental applies to the next placed pitch.
-  var accidental = 0; // -1 flat, 0 natural, +1 sharp (applied to the next pitch)
-
-  // Helper: bind click + touchstart without double-trigger
-  function bindTouchClick(el, handler) {
-    if (!el) return;
-    var touchSeen = false;
-    el.addEventListener("touchstart", function (e) {
-      touchSeen = true;
-      e.preventDefault();
-      handler(e);
-    }, { passive: false });
-    el.addEventListener("click", function (e) {
-      if (touchSeen) {
-        touchSeen = false;
-        return;
-      }
-      handler(e);
-    });
-  }
-
-  function makeButton(label, onClick, className) {
-    var b = document.createElement("button");
-    b.type = "button";
-    b.className = className || "btn";
-    b.textContent = label;
-    b.addEventListener("click", onClick);
-    return b;
-  }
-
-  function buildPitchUI() {
-    pitchButtons.innerHTML = "";
-
-    // Accidental toggles
-    var accWrap = document.createElement("div");
-    accWrap.className = "btnwrap";
-    accWrap.appendChild(makeButton("♭", function(){ accidental = -1; setAccToggles(); }, "btn"));
-    accWrap.appendChild(makeButton("♮", function(){ accidental = 0;  setAccToggles(); }, "btn"));
-    accWrap.appendChild(makeButton("♯", function(){ accidental = 1;  setAccToggles(); }, "btn"));
-    pitchButtons.appendChild(accWrap);
-
-    // Staff field
-    var staffWrap = document.createElement("div");
-    staffWrap.className = "staff";
-    var staffControls = document.createElement("div");
-    staffControls.className = "staff-controls";
-    staffOctDown = makeButton("−", function () { adjustOctave(-1); }, "btn sm");
-    staffOctUp   = makeButton("+", function () { adjustOctave(1); }, "btn sm");
-    staffControls.appendChild(staffOctDown);
-    staffControls.appendChild(staffOctUp);
-    staffWrap.appendChild(staffControls);
-    pitchButtons.appendChild(staffWrap);
+  function buildPitchUI(target){
+    if (!target) return;
+    target.innerHTML="";
+    var staffWrap=document.createElement("div"); staffWrap.className="staff";
+    var staffControls=document.createElement("div"); staffControls.className="staff-controls";
+    staffOctDown=makeButton("−", function(){ adjustOctave(-1); },"btn sm");
+    staffOctUp  =makeButton("+", function(){ adjustOctave(1); },"btn sm");
+    staffControls.appendChild(staffOctDown); staffControls.appendChild(staffOctUp); staffWrap.appendChild(staffControls);
+    target.appendChild(staffWrap);
     buildStaffGrid(staffWrap);
-
     setAccToggles();
   }
 
-  function setAccToggles() {
-    // visually mark selected accidental by outlining the corresponding button (first 3 in the first wrap)
-    var wrap = pitchButtons.firstChild;
-    if (!wrap) return;
-    var btns = wrap.querySelectorAll("button");
-    for (var i = 0; i < btns.length; i++) {
-      btns[i].style.outline = "none";
-    }
-    var idx = (accidental === -1) ? 0 : (accidental === 0 ? 1 : 2);
-    if (btns[idx]) btns[idx].style.outline = "2px solid rgba(28,126,214,0.35)";
+  function setAccToggles(){
+    var wrap=(pitchButtonsSticky && pitchButtonsSticky.firstChild) || (pitchButtons && pitchButtons.firstChild);
+    if(!wrap) return;
+    var btns=wrap.querySelectorAll("button");
+    for(var i=0;i<btns.length;i++) btns[i].classList.remove("active");
+    var idx=accidental===-1?0:(accidental===0?1:2); if(btns[idx]) btns[idx].classList.add("active");
   }
 
-  function buildStaffGrid(root) {
-    root.innerHTML = "";
-    var naturalPcs = [0, 2, 4, 5, 7, 9, 11];
-    // Reichweite: von G3 (mit ♭ erreichbar: F#3) bis B5 (mit ♯ erreichbar: C6)
-    var minMidi = 55;
-    var maxMidi = 83;
-    var baseMidiPositions = [];
-    for (var m = minMidi; m <= maxMidi; m++) {
-      var pc = ((m % 12) + 12) % 12;
-      if (naturalPcs.indexOf(pc) !== -1) baseMidiPositions.push(m);
+  function buildStaffGrid(root){
+    root.innerHTML="";
+    var naturalPcs=[0,2,4,5,7,9,11], minMidi=55, maxMidi=83, baseMidiPositions=[];
+    for(var m=minMidi;m<=maxMidi;m++){ var pc=((m%12)+12)%12; if(naturalPcs.indexOf(pc)!==-1) baseMidiPositions.push(m); }
+    var slots=baseMidiPositions.length, refMidi=71, refIndex=baseMidiPositions.indexOf(refMidi); if(refIndex===-1) refIndex=Math.floor(slots/2);
+    var baseMargin=24, noteStep=16, height=baseMargin*2+noteStep*(slots-1), lineCount=5, lineGap=noteStep*2, minIdxY=refIndex-slots+5, startY=baseMargin+(-minIdxY)*noteStep;
+    var noteSpacing=80, paddingX=60, width=paddingX*2+(slots-1)*noteSpacing, xPositions=[]; for(var xi=0;xi<slots;xi++) xPositions.push(paddingX+xi*noteSpacing);
+    var svgNS="http://www.w3.org/2000/svg", svg=document.createElementNS(svgNS,"svg"); svg.setAttribute("viewBox","0 0 "+width+" "+height); svg.setAttribute("class","staff-svg");
+    for(var i=0;i<lineCount;i++){ var y=startY+i*lineGap; var line=document.createElementNS(svgNS,"line"); line.setAttribute("x1",12); line.setAttribute("x2",width-12); line.setAttribute("y1",y); line.setAttribute("y2",y); line.setAttribute("class","staff-line"); svg.appendChild(line); }
+    var bandHeight=noteStep, octaveShift=(state.octave-4)*12, useSharps=prefersSharps(state.accType,state.accCount);
+    function displayNoteName(midi){ var pc=((midi%12)+12)%12, oct=Math.floor(midi/12)-1, sharp=["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","H"], flat=["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B","H"]; return (useSharps?sharp:flat)[pc]+oct; }
+    function attachClick(el, base){ el.addEventListener("click", function(){ addStaffNote(base); }); }
+    for(var j=0;j<slots;j++){
+      var idxY=(refIndex-j)+4, centerY=startY+idxY*bandHeight;
+      var rect=document.createElementNS(svgNS,"rect"); rect.setAttribute("x",0); rect.setAttribute("width",width); rect.setAttribute("y",centerY-bandHeight/2); rect.setAttribute("height",bandHeight); rect.setAttribute("class","staff-zone"); rect.dataset.baseMidi=baseMidiPositions[j]; svg.appendChild(rect);
+      var r=Math.min(20,bandHeight*1.05); var head=document.createElementNS(svgNS,"circle"); head.setAttribute("cx",xPositions[j]); head.setAttribute("cy",centerY); head.setAttribute("r",r); head.setAttribute("class","notehead"); head.dataset.baseMidi=baseMidiPositions[j]; svg.appendChild(head);
+      var label=document.createElementNS(svgNS,"text"); label.setAttribute("x",xPositions[j]); label.setAttribute("y",centerY+(r-2)); label.setAttribute("class","note-label"); label.textContent=displayNoteName(baseMidiPositions[j]+octaveShift); svg.appendChild(label);
+      var top=startY, bottom=startY+(lineCount-1)*lineGap, ledgerSpacing=lineGap;
+      function ledger(yPos){ var l=document.createElementNS(svgNS,"line"); l.setAttribute("x1",xPositions[j]-30); l.setAttribute("x2",xPositions[j]+30); l.setAttribute("y1",yPos); l.setAttribute("y2",yPos); l.setAttribute("class","ledger-line"); svg.appendChild(l); }
+      if(centerY<top-bandHeight){ for(var ly=top-ledgerSpacing; ly>=centerY-bandHeight; ly-=ledgerSpacing) ledger(ly); }
+      else if(centerY>bottom+bandHeight){ for(var ly2=bottom+ledgerSpacing; ly2<=centerY+bandHeight; ly2+=ledgerSpacing) ledger(ly2); }
+      attachClick(head, baseMidiPositions[j]); attachClick(rect, baseMidiPositions[j]);
     }
-
-    var slots = baseMidiPositions.length;
-    var refMidi = 71; // B4 = Mittel-Linie im Violinschlüssel
-    var refIndex = baseMidiPositions.indexOf(refMidi);
-    if (refIndex === -1) refIndex = Math.floor(slots / 2);
-
-    var baseMargin = 24;
-    var noteStep = 16; // Abstand pro Linie/Leerraum, hält alles lesbar
-    var height = baseMargin * 2 + noteStep * (slots - 1);
-    var lineCount = 5;
-    var lineGap = noteStep * 2;
-    var minIdxY = refIndex - slots + 5;
-    var startY = baseMargin + (-minIdxY) * noteStep;
-
-    var noteSpacing = 80;
-    var paddingX = 60;
-    var width = paddingX * 2 + (slots - 1) * noteSpacing;
-    var xPositions = [];
-    for (var xi = 0; xi < slots; xi++) {
-      xPositions.push(paddingX + xi * noteSpacing);
-    }
-
-    var svgNS = "http://www.w3.org/2000/svg";
-    var svg = document.createElementNS(svgNS, "svg");
-    svg.setAttribute("viewBox", "0 0 " + width + " " + height);
-    svg.setAttribute("class", "staff-svg");
-
-    // Draw lines (top to bottom)
-    for (var i = 0; i < lineCount; i++) {
-      var y = startY + i * lineGap;
-      var line = document.createElementNS(svgNS, "line");
-      line.setAttribute("x1", 12);
-      line.setAttribute("x2", width - 12);
-      line.setAttribute("y1", y);
-      line.setAttribute("y2", y);
-      line.setAttribute("class", "staff-line");
-      svg.appendChild(line);
-    }
-
-    // Click zones + Noteheads (lines + spaces, top to bottom)
-    var bandHeight = noteStep;
-    var octaveShift = (state.octave - 4) * 12;
-    var useSharps = prefersSharps(state.accType, state.accCount);
-
-    function displayNoteName(midi) {
-      var pc = ((midi % 12) + 12) % 12;
-      var octave = Math.floor(midi / 12) - 1;
-      var namesSharp = ["C","C♯","D","D♯","E","F","F♯","G","G♯","A","A♯","H"];
-      var namesFlat  = ["C","D♭","D","E♭","E","F","G♭","G","A♭","A","B","H"];
-      var name = (useSharps ? namesSharp : namesFlat)[pc];
-      return name + octave;
-    }
-
-    function attachClick(el, base) {
-      el.addEventListener("click", function () {
-        var midi = base + octaveShift;
-        addStaffNote(midi);
-      });
-    }
-
-    for (var j = 0; j < slots; j++) {
-      var idxY = (refIndex - j) + 4; // B4 bleibt auf der mittleren Linie
-      var centerY = startY + idxY * bandHeight;
-      var rect = document.createElementNS(svgNS, "rect");
-      rect.setAttribute("x", 0);
-      rect.setAttribute("width", width);
-      rect.setAttribute("y", centerY - bandHeight / 2);
-      rect.setAttribute("height", bandHeight);
-      rect.setAttribute("class", "staff-zone");
-      rect.dataset.baseMidi = baseMidiPositions[j];
-      svg.appendChild(rect);
-
-      var noteRadius = Math.min(20, bandHeight * 1.05);
-      // Notehead preview (eine pro Zeile/Space, nach rechts versetzt)
-      var head = document.createElementNS(svgNS, "circle");
-      head.setAttribute("cx", xPositions[j]);
-      head.setAttribute("cy", centerY);
-      head.setAttribute("r", noteRadius);
-      head.setAttribute("class", "notehead");
-      head.dataset.baseMidi = baseMidiPositions[j];
-      svg.appendChild(head);
-
-      // Ledger lines for notes outside the 5-line staff
-      var topLineY = startY;
-      var bottomLineY = startY + (lineCount - 1) * lineGap;
-      var ledgerSpacing = lineGap;
-      var ledgerWidth = 60;
-      function addLedgerLine(yPos) {
-        var l = document.createElementNS(svgNS, "line");
-        l.setAttribute("x1", xPositions[j] - ledgerWidth / 2);
-        l.setAttribute("x2", xPositions[j] + ledgerWidth / 2);
-        l.setAttribute("y1", yPos);
-        l.setAttribute("y2", yPos);
-        l.setAttribute("class", "ledger-line");
-        svg.appendChild(l);
-      }
-      if (centerY < topLineY - bandHeight) {
-        for (var ly = topLineY - ledgerSpacing; ly >= centerY - bandHeight; ly -= ledgerSpacing) {
-          addLedgerLine(ly);
-        }
-      } else if (centerY > bottomLineY + bandHeight) {
-        for (var ly2 = bottomLineY + ledgerSpacing; ly2 <= centerY + bandHeight; ly2 += ledgerSpacing) {
-          addLedgerLine(ly2);
-        }
-      }
-
-      // Label unter der Note
-      var label = document.createElementNS(svgNS, "text");
-      label.setAttribute("x", xPositions[j]);
-      label.setAttribute("y", centerY + (noteRadius - 2));
-      label.setAttribute("class", "note-label");
-      label.textContent = displayNoteName(baseMidiPositions[j] + octaveShift);
-      svg.appendChild(label);
-      attachClick(head, baseMidiPositions[j]);
-
-      attachClick(rect, baseMidiPositions[j]);
-    }
-
     root.appendChild(svg);
   }
 
-  function pushNote(midi) {
-    state.tokens.push({
-      kind: "note",
-      midi: midi,
-      dur: state.dur,
-      slurStart: state.slurStartNext,
-      slurEnd: state.slurEndNext
-    });
-    state.slurStartNext = false;
-    state.slurEndNext = false;
-    updateSlurButtons();
-    sync();
+  function addStaffNote(baseMidi){
+    var midi=baseMidi+(accidental||0);
+    state.tokens.push({kind:"note", midi:midi, dur:state.dur, slurStart:state.slurStartNext, slurEnd:state.slurEndNext});
+    accidental=0; state.slurStartNext=false; state.slurEndNext=false;
+    updateSlurButtons(); setAccToggles(); sync();
+  }
+  function addRestToken(){ state.tokens.push({kind:"rest", dur:state.dur}); sync(); }
+  function addBarToken(){ state.tokens.push({kind:"bar"}); sync(); }
+  function addNewlineToken(){ state.tokens.push({kind:"newline"}); sync(); }
+  function undoToken(){ state.tokens.pop(); sync(); }
+  function clearTokens(){ state.tokens=[]; sync(); }
+
+  function setOctaveLabel(){ octLabel.textContent="C"+state.octave; var staff=document.querySelector(".staff"); if(staff) buildStaffGrid(staff); }
+  function meterToEighths(meter){ if(!meter||typeof meter!=="string") return 8; var p=meter.split("/"); if(p.length!==2) return 8; var num=parseInt(p[0],10), den=parseInt(p[1],10); if(!num||!den) return 8; return num*(8/den); }
+
+  function computeKeyInfo(){
+    var key=keyFromSignature(state.accType,state.accCount,state.mode), prefer=prefersSharps(state.accType,state.accCount), trans=transposeSemis(state.instrument), basePc=keyToPc(key), isMinor=state.mode==="minor", writtenPc=((basePc+trans)%12+12)%12;
+    return { baseKeyName:pcToKeyName(basePc,isMinor,prefer), writtenKeyName:pcToKeyName(writtenPc,isMinor,prefer), preferSharps:prefer, transSemis:trans };
   }
 
-  function addStaffNote(baseMidi) {
-    var midi = baseMidi + (accidental || 0);
-    pushNote(midi);
-    accidental = 0;
-    setAccToggles();
-  }
-
-  function addRestToken() {
-    state.tokens.push({ kind: "rest", dur: state.dur });
-    sync();
-  }
-
-  function addBarToken() {
-    state.tokens.push({ kind: "bar" });
-    sync();
-  }
-
-  function addNewlineToken() {
-    state.tokens.push({ kind: "newline" });
-    sync();
-  }
-
-  function undoToken() {
-    state.tokens.pop();
-    sync();
-  }
-
-  function clearTokens() {
-    state.tokens = [];
-    sync();
-  }
-
-  function setOctaveLabel() {
-    // show as C{octave}
-    octLabel.textContent = "C" + state.octave;
-    // Rebuild staff zones to reflect octave shift
-    var staff = document.querySelector(".staff");
-    if (staff) buildStaffGrid(staff);
-  }
-
-  function meterToEighths(meter) {
-    if (!meter || typeof meter !== "string") return 8;
-    var parts = meter.split("/");
-    if (parts.length !== 2) return 8;
-    var num = parseInt(parts[0], 10);
-    var den = parseInt(parts[1], 10);
-    if (!num || !den) return 8;
-    return num * (8 / den);
-  }
-
-  function computeKeyInfo() {
-    var key = keyFromSignature(state.accType, state.accCount, state.mode);
-    var preferSharpNames = prefersSharps(state.accType, state.accCount);
-    var trans = transposeSemitonesForInstrument(state.instrument);
-    var basePc = keyToPc(key);
-    var isMinor = state.mode === "minor";
-    var writtenPc = ((basePc + trans) % 12 + 12) % 12;
-
-    return {
-      baseKeyName: pcToKeyName(basePc, isMinor, preferSharpNames),
-      writtenKeyName: pcToKeyName(writtenPc, isMinor, preferSharpNames),
-      preferSharps: preferSharpNames,
-      transSemis: trans
-    };
-  }
-
-  // --- Generate ABC ---
-  function buildAbc(keyInfo) {
-    var info = keyInfo || computeKeyInfo();
-    var useSharps = info.preferSharps;
-    var trans = info.transSemis;
-    var userShift = state.pitchShift || 0;
-    var title = state.title || "";
-    var measureLen = meterToEighths(state.meter);
-
-    // Header
-    var abc = [];
-    abc.push("X:1");
-    abc.push("T:" + title);
-    abc.push("M:" + state.meter);
-    abc.push("L:1/8");
-    abc.push("K:" + info.writtenKeyName);
-
-    // Body: transpose MIDI notes for instrument
-    var body = [];
-    var names = [];
-    var accCount = 0;
-
-    var renderTokens = state.tokens.length ? state.tokens : [{ kind: "placeholder" }];
-
-    for (var i = 0; i < renderTokens.length; i++) {
-      var t = renderTokens[i];
-      if (t.kind === "placeholder") {
-        var placeholderDur = measureLen > 0 ? measureLen : 8;
-        body.push("!style=opacity:0.001!z" + durToAbc(placeholderDur));
-        names.push("");
-        accCount = 0;
-        continue;
-      }
-      if (t.kind === "bar") {
-        body.push("|");
-        names.push("|");
-        accCount = 0;
-        continue;
-      }
-      if (t.kind === "newline") {
-        body.push("\n");
-        names.push("\n");
-        accCount = 0;
-        continue;
-      }
-      if (t.kind === "rest") {
-        var restToken = "z" + durToAbc(t.dur);
-        body.push(restToken);
-        names.push(restToken);
-        accCount += t.dur;
-      } else if (t.kind === "note") {
-        var outMidi = t.midi + userShift + trans;
-        var noteText = midiToAbc(outMidi, useSharps);
-        var durText = durToAbc(t.dur);
-        var prefix = t.slurStart ? "(" : "";
-        var suffix = t.slurEnd ? ")" : "";
-        body.push(prefix + noteText + durText + suffix);
-        names.push(prefix + noteText + suffix);
-        accCount += t.dur;
-      } else {
-        continue;
-      }
-
-      if (state.autoBars && measureLen > 0) {
-        while (accCount >= measureLen) {
-          body.push("|");
-          names.push("|");
-          accCount -= measureLen;
-        }
-      }
+  function buildAbc(keyInfo){
+    var info=keyInfo||computeKeyInfo(), useSharps=info.preferSharps, trans=info.transSemis, title=state.title||"", measureLen=meterToEighths(state.meter);
+    var abc=["X:1","T:"+title,"M:"+state.meter,"L:1/8","K:"+info.writtenKeyName], body=[], names=[], accCount=0;
+    for(var i=0;i<state.tokens.length;i++){
+      var t=state.tokens[i];
+      if(t.kind==="bar"){ body.push("|"); names.push("|"); accCount=0; continue; }
+      if(t.kind==="newline"){ body.push("\n"); names.push("\n"); accCount=0; continue; }
+      if(t.kind==="rest"){ var r="z"+durToAbc(t.dur); body.push(r); names.push(r); accCount+=t.dur; }
+      else if(t.kind==="note"){ var out=t.midi+trans, note=midiToAbc(out,useSharps), dur=durToAbc(t.dur), pre=t.slurStart?"(":"", suf=t.slurEnd?")":""; body.push(pre+note+dur+suf); names.push(pre+note+suf); accCount+=t.dur; }
+      if(state.autoBars && measureLen>0){ while(accCount>=measureLen){ body.push("|"); names.push("|"); accCount-=measureLen; } }
     }
-
-    // Keep it readable: respect explicit newlines, otherwise wrap nach Wunsch (tokensPerLine)
-    var wrapped = [];
-    var line = [];
-    var wrapLen = clampInt(state.tokensPerLine, 0, 64);
-    for (var j = 0; j < body.length; j++) {
-      var tok = body[j];
-      if (tok === "\n") {
-        wrapped.push(line.join(" "));
-        line = [];
-        continue;
-      }
-      line.push(tok);
-      if (wrapLen > 0 && line.length >= wrapLen) {
-        wrapped.push(line.join(" "));
-        line = [];
-      }
-    }
-    if (line.length) wrapped.push(line.join(" "));
-
-    abc.push(wrapped.join("\n"));
-    return { abc: abc.join("\n"), names: names.join(" ") };
+    var wrapped=[], line=[]; for(var j=0;j<body.length;j++){ var tok=body[j]; if(tok==="\n"){ wrapped.push(line.join(" ")); line=[]; continue; } line.push(tok); if(state.tokensPerLine>0 && line.length>=state.tokensPerLine){ wrapped.push(line.join(" ")); line=[]; } }
+    if(line.length) wrapped.push(line.join(" "));
+    abc.push(wrapped.join("\n")); return { abc:abc.join("\n"), names:names.join(" ") };
   }
 
-  function renderAbc(abc) {
-    if (!window.ABCJS || !window.ABCJS.renderAbc) {
-      renderStatus.textContent = "abcjs noch nicht geladen (CDN).";
-      return;
-    }
-    paper.innerHTML = "";
-    renderStatus.textContent = "";
-    try {
-      window.ABCJS.renderAbc(paper, abc, {
-        responsive: "resize",
-        add_classes: true
-      });
-    } catch (e) {
-      renderStatus.textContent = "Render-Fehler: " + (e && e.message ? e.message : String(e));
-    }
+  function renderAbc(abc){
+    if(!window.ABCJS||!window.ABCJS.renderAbc){ renderStatus.textContent="abcjs noch nicht geladen (CDN)."; return; }
+    paper.innerHTML=""; renderStatus.textContent="";
+    try{ window.ABCJS.renderAbc(paper, abc, { responsive:"resize", add_classes:true }); }
+    catch(e){ renderStatus.textContent="Render-Fehler: "+(e&&e.message?e.message:String(e)); }
   }
 
-  // --- Sync ---
-  function sync() {
-    var keyInfo = computeKeyInfo();
-    var originalName = describeKeyName(keyInfo.baseKeyName);
-    if (origKeyLabel) origKeyLabel.textContent = originalName;
-    if (origKeyText) origKeyText.textContent = originalName;
-    if (targetKeyLabel) targetKeyLabel.textContent = describeKeyName(keyInfo.writtenKeyName);
+  function sync(){
+    var info=computeKeyInfo(), original=describeKeyName(info.baseKeyName);
+    origKeyText.textContent=original; targetKeyLabel.textContent=describeKeyName(info.writtenKeyName);
     setOctaveLabel();
-    var res = buildAbc(keyInfo);
-    if (noteNamesEl) noteNamesEl.textContent = res.names;
+    var res=buildAbc(info);
+    noteNamesEl.textContent=res.names;
     renderAbc(res.abc);
   }
 
-  // --- Wire controls ---
-  function setSegActive(btnOn, btnOff) {
-    btnOn.classList.add("active");
-    btnOff.classList.remove("active");
-  }
+  function setSegActive(on,off){ on.classList.add("active"); off.classList.remove("active"); }
 
-  accTypeSharps.addEventListener("click", function () {
-    state.accType = "sharps";
-    setSegActive(accTypeSharps, accTypeFlats);
-    sync();
-  });
+  accTypeSharps.addEventListener("click", function(){ state.accType="sharps"; setSegActive(accTypeSharps,accTypeFlats); sync(); });
+  accTypeFlats.addEventListener("click", function(){ state.accType="flats"; setSegActive(accTypeFlats,accTypeSharps); sync(); });
+  accCount.addEventListener("change", function(){ state.accCount=clamp(accCount.value,0,7); sync(); });
+  modeMajor.addEventListener("click", function(){ state.mode="major"; setSegActive(modeMajor,modeMinor); sync(); });
+  modeMinor.addEventListener("click", function(){ state.mode="minor"; setSegActive(modeMinor,modeMajor); sync(); });
+  meter.addEventListener("change", function(){ state.meter=meter.value||"4/4"; sync(); });
+  instrument.addEventListener("change", function(){ state.instrument=instrument.value||"Bb"; sync(); });
+  if(tokensPerLine){ tokensPerLine.addEventListener("change", function(){ var v=parseInt(tokensPerLine.value,10); if(isNaN(v)) v=state.tokensPerLine; v=Math.max(0,Math.min(64,v)); state.tokensPerLine=v; tokensPerLine.value=v; sync(); }); tokensPerLine.value=state.tokensPerLine; }
+  if(pitchShift){ pitchShift.addEventListener("change", function(){ var v=parseInt(pitchShift.value,10); if(isNaN(v)) v=state.pitchShift; v=Math.max(-12,Math.min(12,v)); state.pitchShift=v; pitchShift.value=v; shiftLabel.textContent=v; sync(); }); pitchShift.value=state.pitchShift; }
+  if(shiftDownBtn&&shiftUpBtn&&shiftLabel){ function applyShift(d){ var n=Math.max(-12,Math.min(12,state.pitchShift+d)); state.pitchShift=n; pitchShift.value=n; shiftLabel.textContent=n; sync(); } shiftDownBtn.addEventListener("click", function(){ applyShift(-1); }); shiftUpBtn.addEventListener("click", function(){ applyShift(1); }); shiftLabel.textContent=state.pitchShift; }
 
-  accTypeFlats.addEventListener("click", function () {
-    state.accType = "flats";
-    setSegActive(accTypeFlats, accTypeSharps);
-    sync();
-  });
+  function setDurActive(btn){ var all=document.querySelectorAll(".btn.dur"); for(var i=0;i<all.length;i++) all[i].classList.remove("active"); btn.classList.add("active"); }
+  function handleDurTarget(t){ if(!t||!t.classList||!t.classList.contains("dur")) return; var v=t.getAttribute("data-dur"); state.dur=(v==="1/2")?0.5:parseInt(v,10); setDurActive(t); }
+  var durTouchSeen=false;
+  document.addEventListener("touchstart", function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains("dur")){ durTouchSeen=true; e.preventDefault(); handleDurTarget(t); sync(); } }, {passive:false});
+  document.addEventListener("click", function(e){ var t=e.target; if(durTouchSeen){ durTouchSeen=false; if(t&&t.classList&&t.classList.contains("dur")) return; } handleDurTarget(t); sync(); });
 
-  accCount.addEventListener("change", function () {
-    state.accCount = clampInt(accCount.value, 0, 7);
-    sync();
-  });
-
-  modeMajor.addEventListener("click", function () {
-    state.mode = "major";
-    setSegActive(modeMajor, modeMinor);
-    sync();
-  });
-
-  modeMinor.addEventListener("click", function () {
-    state.mode = "minor";
-    setSegActive(modeMinor, modeMajor);
-    sync();
-  });
-
-  meter.addEventListener("change", function () {
-    state.meter = meter.value || "4/4";
-    sync();
-  });
-
-  instrument.addEventListener("change", function () {
-    state.instrument = instrument.value || "Bb";
-    sync();
-  });
-
-  if (tokensPerLine) {
-    tokensPerLine.addEventListener("change", function () {
-      var v = parseInt(tokensPerLine.value, 10);
-      if (isNaN(v)) v = state.tokensPerLine;
-      v = Math.max(0, Math.min(64, v));
-      state.tokensPerLine = v;
-      tokensPerLine.value = v;
-      sync();
-    });
-    tokensPerLine.value = state.tokensPerLine;
-  }
-
-  if (pitchShift) {
-    pitchShift.addEventListener("change", function () {
-      var v = parseInt(pitchShift.value, 10);
-      if (isNaN(v)) v = state.pitchShift;
-      v = Math.max(-12, Math.min(12, v));
-      state.pitchShift = v;
-      pitchShift.value = v;
-      sync();
-    });
-    pitchShift.value = state.pitchShift;
-  }
-  if (shiftDownBtn && shiftUpBtn && shiftLabel) {
-    function applyShift(delta) {
-      var next = Math.max(-12, Math.min(12, state.pitchShift + delta));
-      state.pitchShift = next;
-      if (pitchShift) pitchShift.value = next;
-      shiftLabel.textContent = next;
-      sync();
-    }
-    bindTouchClick(shiftDownBtn, function () { applyShift(-1); });
-    bindTouchClick(shiftUpBtn, function () { applyShift(1); });
-    shiftLabel.textContent = state.pitchShift;
-  }
-
-  if (previewOverlay) {
-    previewOverlay.addEventListener("mousemove", function (e) {
-      var rect = previewOverlay.getBoundingClientRect();
-      var y = e.clientY - rect.top;
-      var midi = overlayMidiFromY(y, rect.height);
-      showGhost(y, midi);
-    });
-    previewOverlay.addEventListener("mouseleave", hideGhost);
-    previewOverlay.addEventListener("click", function (e) {
-      var rect = previewOverlay.getBoundingClientRect();
-      var y = e.clientY - rect.top;
-      var midi = overlayMidiFromY(y, rect.height);
-      pushNote(midi);
-      accidental = 0;
-      setAccToggles();
-    });
-  }
-
-  function markSetupDone() {
-    try { localStorage.setItem(SETUP_DONE_KEY, "yes"); } catch (e) {}
-  }
-  function shouldRunSetup() {
-    try { return !localStorage.getItem(SETUP_DONE_KEY); } catch (e) { return true; }
-  }
-
-  function openSavePrompt() {
-    guidedActive = false;
-    if (!stepModal || !stepModalBody) return;
-    returnModalContentToSidebar();
-    stepModalBody.innerHTML = "";
-    var msg = document.createElement("div");
-    var title = document.createElement("h3");
-    title.textContent = "Einstellungen speichern?";
-    var info = document.createElement("p");
-    info.className = "note";
-    info.textContent = "Speichere im Browser (localStorage), damit die gleichen Einstellungen beim nächsten Laden bereitstehen. Sie bleiben nur auf diesem Gerät/Browser.";
-    msg.appendChild(title);
-    msg.appendChild(info);
-    stepModalBody.appendChild(msg);
-    if (stepModalFooter) {
-      stepModalFooter.innerHTML = "";
-      var saveBtn = document.createElement("button");
-      saveBtn.className = "btn";
-      saveBtn.textContent = "Einstellungen speichern";
-      saveBtn.addEventListener("click", function () {
-        saveSettingsToStorage();
-        markSetupDone();
-        closeStepModal();
-      });
-      var skipBtn = document.createElement("button");
-      skipBtn.className = "btn danger";
-      skipBtn.textContent = "Nicht speichern";
-      skipBtn.addEventListener("click", function () {
-        clearSettingsStorage();
-        markSetupDone();
-        closeStepModal();
-      });
-      stepModalFooter.appendChild(skipBtn);
-      stepModalFooter.appendChild(saveBtn);
-    }
-    stepModal.classList.add("open");
-  }
-
-  function renderGuidedFooter() {
-    if (!stepModalFooter) return;
-    stepModalFooter.innerHTML = "";
-    if (!guidedActive) return;
-    var info = document.createElement("span");
-    info.className = "small";
-    info.textContent = "Schritt " + guidedIndex + " von 4";
-    var nextBtn = document.createElement("button");
-    nextBtn.className = "btn";
-    nextBtn.textContent = guidedIndex >= 4 ? "Weiter" : "Weiter";
-    nextBtn.addEventListener("click", function () {
-      guidedIndex += 1;
-      if (guidedIndex > 4) {
-        openSavePrompt();
-      } else {
-        openStepModal(String(guidedIndex));
-        renderGuidedFooter();
-      }
-    });
-    var cancelBtn = document.createElement("button");
-    cancelBtn.className = "btn danger";
-    cancelBtn.textContent = "Setup abbrechen";
-    cancelBtn.addEventListener("click", function () {
-      guidedActive = false;
-      closeStepModal();
-    });
-    stepModalFooter.appendChild(cancelBtn);
-    stepModalFooter.appendChild(info);
-    stepModalFooter.appendChild(nextBtn);
-  }
-
-  function startGuidedSetup() {
-    guidedActive = true;
-    guidedIndex = 1;
-    openStepModal("1");
-    renderGuidedFooter();
-  }
-  if (startSetupBtn) {
-    bindTouchClick(startSetupBtn, function () {
-      guidedActive = true;
-      guidedIndex = 1;
-      openStepModal("1");
-      renderGuidedFooter();
-    });
-  }
-  if (openStepsBtn) {
-    bindTouchClick(openStepsBtn, function () {
-      guidedActive = false;
-      openStepModal("1");
-    });
-  }
-
-  // Duration buttons
-  function setDurActive(targetBtn) {
-    var all = document.querySelectorAll(".btn.dur");
-    for (var i = 0; i < all.length; i++) all[i].classList.remove("active");
-    targetBtn.classList.add("active");
-  }
-
-  function handleDurTarget(t) {
-    if (!t || !t.classList || !t.classList.contains("dur")) return;
-    var v = t.getAttribute("data-dur");
-    state.dur = (v === "1/2") ? 0.5 : parseInt(v, 10);
-    setDurActive(t);
-    sync();
-  }
-
-  var durTouchSeen = false;
-  document.addEventListener("touchstart", function (e) {
-    var t = e.target;
-    if (t && t.classList && t.classList.contains("dur")) {
-      durTouchSeen = true;
-      e.preventDefault();
-      handleDurTarget(t);
-    }
-  }, { passive: false });
-
-  document.addEventListener("click", function (e) {
-    var t = e.target;
-    if (durTouchSeen) {
-      durTouchSeen = false;
-      // Skip the synthetic click after touch to avoid double execution.
-      if (t && t.classList && t.classList.contains("dur")) return;
-    }
-    handleDurTarget(t);
-  });
-
-  function adjustOctave(delta) {
-    state.octave = Math.min(8, Math.max(1, state.octave + delta));
-    sync();
-  }
-
-  octDown.addEventListener("click", function () {
-    adjustOctave(-1);
-  });
-
-  octUp.addEventListener("click", function () {
-    adjustOctave(1);
-  });
+  function adjustOctave(d){ state.octave=Math.min(8,Math.max(1,state.octave+d)); sync(); }
+  octDown.addEventListener("click", function(){ adjustOctave(-1); });
+  octUp.addEventListener("click", function(){ adjustOctave(1); });
 
   bindTouchClick(addRest, addRestToken);
   bindTouchClick(addBar, addBarToken);
   bindTouchClick(addNewline, addNewlineToken);
-  function updateSlurButtons() {
-    if (slurStartBtn) slurStartBtn.classList.toggle("active", state.slurStartNext);
-    if (slurEndBtn) slurEndBtn.classList.toggle("active", state.slurEndNext);
-  }
+  function updateSlurButtons(){ slurStartBtn.classList.toggle("active", state.slurStartNext); slurEndBtn.classList.toggle("active", state.slurEndNext); }
   updateSlurButtons();
-  if (slurStartBtn) {
-    bindTouchClick(slurStartBtn, function () {
-      state.slurStartNext = !state.slurStartNext;
-      updateSlurButtons();
-    });
-  }
-  if (slurEndBtn) {
-    bindTouchClick(slurEndBtn, function () {
-      state.slurEndNext = !state.slurEndNext;
-      updateSlurButtons();
-    });
-  }
+  bindTouchClick(slurStartBtn, function(){ state.slurStartNext=!state.slurStartNext; updateSlurButtons(); });
+  bindTouchClick(slurEndBtn, function(){ state.slurEndNext=!state.slurEndNext; updateSlurButtons(); });
   bindTouchClick(undo, undoToken);
   bindTouchClick(clearBtn, clearTokens);
-  function triggerPrint() { window.print(); }
-  if (printBtn) bindTouchClick(printBtn, triggerPrint);
-  if (savePdfBtn) bindTouchClick(savePdfBtn, downloadPdf);
-  if (titleInput) {
-    titleInput.addEventListener("input", function () {
-      state.title = titleInput.value || "";
-      sync();
-    });
-  }
-  if (autoBars) {
-    autoBars.addEventListener("change", function () {
-      state.autoBars = !!autoBars.checked;
-      sync();
-    });
-    state.autoBars = !!autoBars.checked;
-  }
+  if(titleInput){ titleInput.addEventListener("input", function(){ state.title=titleInput.value||""; sync(); }); }
+  if(autoBars){ autoBars.addEventListener("change", function(){ state.autoBars=!!autoBars.checked; sync(); }); state.autoBars=!!autoBars.checked; }
 
-  // Theme toggle (light/dark), persists in localStorage. Paper/staff bleiben weiß, da deren Styles feste Farben nutzen.
-  function applyTheme(theme) {
-    var mode = (theme === "dark") ? "dark" : "light";
-    document.body.classList.toggle("dark", mode === "dark");
-    if (themeToggle) themeToggle.textContent = mode === "dark" ? "Light Mode" : "Dark Mode";
-    try { localStorage.setItem("claritrans-theme", mode); } catch (e) {}
+  function applyTheme(theme){
+    var mode=(theme==="dark")?"dark":"light";
+    document.body.classList.toggle("dark", mode==="dark");
+    if(themeToggle){
+      var icon = mode==="dark" ? "☀️" : "🌙";
+      var label = mode==="dark" ? "Auf hell schalten" : "Auf dunkel schalten";
+      themeToggle.textContent=icon;
+      themeToggle.setAttribute("aria-label", label);
+    }
+    try{ localStorage.setItem("claritrans-theme", mode); }catch(e){}
   }
-  if (themeToggle) {
-    bindTouchClick(themeToggle, function () {
-      var next = document.body.classList.contains("dark") ? "light" : "dark";
-      applyTheme(next);
-    });
-  }
-  (function initTheme(){
-    var saved = "light";
-    try { saved = localStorage.getItem("claritrans-theme") || "light"; } catch(e){}
-    applyTheme(saved);
-  })();
+  if(themeToggle){ themeToggle.addEventListener("click", function(){ var next=document.body.classList.contains("dark")?"light":"dark"; applyTheme(next); }); }
+  (function initTheme(){ var saved="light"; try{ saved=localStorage.getItem("claritrans-theme")||"light"; }catch(e){} applyTheme(saved); })();
 
-  // Drawer (Burger-Menü) für die Sidebar
-  function setDrawer(open) {
-    document.body.classList.toggle("menu-open", open);
-    if (menuToggle) {
-      menuToggle.setAttribute("aria-expanded", open ? "true" : "false");
-      menuToggle.textContent = open ? "✕ Schließen" : "☰ Menü";
+  function setDockOpen(open){
+    var body=document.body;
+    var next = (typeof open==="boolean") ? open : !body.classList.contains("dock-open");
+    body.classList.toggle("dock-open", next);
+    if(dockToggle){
+      dockToggle.textContent = next ? "Einstellungen ←" : "Einstellungen →";
+      dockToggle.setAttribute("aria-label", next ? "Einstellungen ausblenden" : "Einstellungen einblenden");
     }
   }
-  if (menuToggle) {
-    bindTouchClick(menuToggle, function () {
-      var next = !document.body.classList.contains("menu-open");
-      setDrawer(next);
-    });
-  }
-  if (drawerOverlay) {
-    bindTouchClick(drawerOverlay, function () { setDrawer(false); });
-  }
-  if (clearSettingsBtn) {
-    bindTouchClick(clearSettingsBtn, function () {
-      clearSettingsStorage();
-      try { localStorage.removeItem(SETUP_DONE_KEY); } catch (e) {}
-      if (renderStatus) renderStatus.textContent = "Gespeicherte Einstellungen gelöscht.";
-    });
-  }
-  document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") setDrawer(false);
-  });
-  setDrawer(false);
+  if(dockToggle){ dockToggle.addEventListener("click", function(e){ e.stopPropagation(); setDockOpen(); }); }
 
-  // Step modals (ersetzen Sidebar-Steuerungen durch Popups)
-  var stepCards = {};
-  var sidebarCards = document.querySelectorAll(".sidebar .card");
-  for (var si = 0; si < sidebarCards.length; si++) {
-    var card = sidebarCards[si];
-    var stepId = card.getAttribute("data-step") || String(si + 1);
-    stepCards[stepId] = card;
-  }
-  function returnModalContentToSidebar() {
-    if (!sidebarEl || !stepModalBody) return;
-    var child = stepModalBody.firstChild;
-    if (child && Object.values(stepCards).indexOf(child) !== -1) {
-      sidebarEl.appendChild(child);
+  function setActionsOpen(open){
+    if(!actionsPanel) return;
+    var wrap=actionsPanel.parentElement;
+    if(!wrap) return;
+    var next = (typeof open==="boolean") ? open : !wrap.classList.contains("open");
+    wrap.classList.toggle("open", next);
+    if(actionsTab){
+      actionsTab.setAttribute("aria-expanded", next);
+      actionsTab.textContent = next ? "Aktionen ▼" : "Aktionen ▲";
     }
-    stepModalBody.innerHTML = "";
   }
-  function renderModalFooter(content) {
-    if (!stepModalFooter) return;
-    stepModalFooter.innerHTML = "";
-    if (content) stepModalFooter.appendChild(content);
-  }
-  function closeStepModal() {
-    renderModalFooter(null);
-    returnModalContentToSidebar();
-    if (stepModal) stepModal.classList.remove("open");
-  }
-  function openStepModal(step) {
-    if (!stepModal || !stepModalBody) return;
-    returnModalContentToSidebar();
-    var content = stepCards[step];
-    if (content) {
-      stepModalBody.appendChild(content);
-    } else {
-      stepModalBody.textContent = "Keine Inhalte für diesen Schritt.";
-    }
-    stepModal.classList.add("open");
-    if (!guidedActive) renderModalFooter(null); else renderGuidedFooter();
-  }
-  if (stepModalClose) bindTouchClick(stepModalClose, closeStepModal);
-  if (stepModal) {
-    var backdrop = stepModal.querySelector(".modal-backdrop");
-    if (backdrop) bindTouchClick(backdrop, closeStepModal);
-  }
-  Object.keys(stepBtns).forEach(function (k) {
-    if (stepBtns[k]) {
-      bindTouchClick(stepBtns[k], function () { openStepModal(k); });
-    }
+  if(actionsTab){ actionsTab.addEventListener("click", function(e){ e.stopPropagation(); setActionsOpen(); }); }
+  document.addEventListener("click", function(e){
+    var wrap=actionsPanel && actionsPanel.parentElement;
+    if(!wrap || !wrap.classList.contains("open")) return;
+    if(wrap.contains(e.target)) return;
+    setActionsOpen(false);
   });
 
-  // Export als PDF direkt aus dem gerenderten SVG (mobil-freundlicher als window.print)
-  // Try to resolve svg2pdf from various UMD shapes
-  function getSvg2pdfFn() {
-    if (typeof window.svg2pdf === "function") return window.svg2pdf;
-    if (window.svg2pdf && typeof window.svg2pdf.default === "function") return window.svg2pdf.default;
-    if (window.svg2pdf && typeof window.svg2pdf.svg2pdf === "function") return window.svg2pdf.svg2pdf;
-    if (typeof window.svg2pdfjs === "function") return window.svg2pdfjs;
-    if (window.svg2pdfjs && typeof window.svg2pdfjs.default === "function") return window.svg2pdfjs.default;
-    if (window.svg2pdfjs && typeof window.svg2pdfjs.svg2pdf === "function") return window.svg2pdfjs.svg2pdf;
-    return null;
-  }
+  function bindTouchClick(el, handler){ if(!el) return; var touchSeen=false; el.addEventListener("touchstart", function(e){ touchSeen=true; e.preventDefault(); handler(e); }, {passive:false}); el.addEventListener("click", function(e){ if(touchSeen){ touchSeen=false; return; } handler(e); }); }
+
+  function getSvgDims(svg){ var w=parseFloat(svg.getAttribute("width"))||0, h=parseFloat(svg.getAttribute("height"))||0, vb=svg.getAttribute("viewBox"); if((!w||!h)&&vb){ var p=vb.split(/\s+/).map(parseFloat); if(p.length===4){w=p[2]; h=p[3];}} if((!w||!h)&&svg.getBBox){ try{ var bb=svg.getBBox(); w=w||bb.width; h=h||bb.height; }catch(e){} } return {w:w||800,h:h||400}; }
+  function svgToPng(svg,w,h){ return new Promise(function(resolve,reject){ var ser=new XMLSerializer(), svgStr=ser.serializeToString(svg), blob=new Blob([svgStr],{type:"image/svg+xml;charset=utf-8"}), url=URL.createObjectURL(blob), img=new Image(); img.onload=function(){ var c=document.createElement("canvas"); c.width=w; c.height=h; var ctx=c.getContext("2d"); ctx.drawImage(img,0,0,w,h); URL.revokeObjectURL(url); try{ resolve(c.toDataURL("image/png")); }catch(err){ reject(err); } }; img.onerror=function(e){ URL.revokeObjectURL(url); reject(e); }; img.src=url; }); }
   var svg2pdfLoader;
-  function ensureSvg2pdf() {
-    var fn = getSvg2pdfFn();
-    if (fn) return Promise.resolve(fn);
-    if (svg2pdfLoader) return svg2pdfLoader;
-    svg2pdfLoader = new Promise(function (resolve, reject) {
-      var script = document.createElement("script");
-      script.src = "https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js";
-      script.onload = function () {
-        var f = getSvg2pdfFn();
-        if (f) resolve(f); else reject(new Error("svg2pdf after load not found"));
-      };
-      script.onerror = function () { reject(new Error("svg2pdf load failed")); };
-      document.head.appendChild(script);
-    });
-    return svg2pdfLoader;
+  function getSvg2pdfFn(){ if(typeof window.svg2pdf==="function") return window.svg2pdf; if(window.svg2pdf&&typeof window.svg2pdf.default==="function") return window.svg2pdf.default; if(window.svg2pdf&&typeof window.svg2pdf.svg2pdf==="function") return window.svg2pdf.svg2pdf; if(typeof window.svg2pdfjs==="function") return window.svg2pdfjs; if(window.svg2pdfjs&&typeof window.svg2pdfjs.default==="function") return window.svg2pdfjs.default; if(window.svg2pdfjs&&typeof window.svg2pdfjs.svg2pdf==="function") return window.svg2pdfjs.svg2pdf; return null; }
+  function ensureSvg2pdf(){ var fn=getSvg2pdfFn(); if(fn) return Promise.resolve(fn); if(svg2pdfLoader) return svg2pdfLoader; svg2pdfLoader=new Promise(function(resolve,reject){ var s=document.createElement("script"); s.src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.4/dist/svg2pdf.umd.min.js"; s.onload=function(){ var f=getSvg2pdfFn(); if(f) resolve(f); else reject(new Error("svg2pdf not found")); }; s.onerror=function(){ reject(new Error("svg2pdf load failed")); }; document.head.appendChild(s); }); return svg2pdfLoader; }
+
+  async function downloadPdf(){
+    if(!window.jspdf){ if(renderStatus) renderStatus.textContent="PDF-Export: jsPDF nicht geladen."; return; }
+    var svg=paper && paper.querySelector("svg"); if(!svg){ if(renderStatus) renderStatus.textContent="PDF-Export: Kein Notenblatt gefunden."; return; }
+    var fn=null; try{ fn=await ensureSvg2pdf(); }catch(e){ fn=null; }
+    var dims=getSvgDims(svg), doc=new (window.jspdf.jsPDF)({unit:"pt",format:"a4"}), pageW=doc.internal.pageSize.getWidth(), pageH=doc.internal.pageSize.getHeight(), margin=24, scale=Math.min((pageW-margin*2)/dims.w,(pageH-margin*2)/dims.h), x=margin,y=margin;
+    try{
+      if(fn){ var clone=svg.cloneNode(true), res=fn(clone, doc,{x:x,y:y,width:dims.w*scale,height:dims.h*scale}); if(res&&typeof res.then==="function") await res; }
+      else { var dataUrl=await svgToPng(svg,dims.w,dims.h); doc.addImage(dataUrl,"PNG",x,y,dims.w*scale,dims.h*scale); }
+      doc.save("claritrans.pdf"); if(renderStatus) renderStatus.textContent="PDF gespeichert.";
+    }catch(err){ if(renderStatus) renderStatus.textContent="PDF-Export fehlgeschlagen."; console.error(err); }
   }
 
-  function getSvgDims(svg) {
-    var w = parseFloat(svg.getAttribute("width")) || 0;
-    var h = parseFloat(svg.getAttribute("height")) || 0;
-    var vb = svg.getAttribute("viewBox");
-    if ((!w || !h) && vb) {
-      var parts = vb.split(/\s+/).map(parseFloat);
-      if (parts.length === 4) {
-        w = parts[2];
-        h = parts[3];
-      }
-    }
-    if ((!w || !h) && svg.getBBox) {
-      try {
-        var bb = svg.getBBox();
-        w = w || bb.width;
-        h = h || bb.height;
-      } catch (e) {}
-    }
-    return { w: w || 800, h: h || 400 };
-  }
+  (function installPrintTitleHack(){ var original=document.title; function clearTitle(){ document.title=" "; } function restore(){ document.title=original; } window.addEventListener("beforeprint", clearTitle); window.addEventListener("afterprint", restore); })();
 
-  function svgToPngDataUrl(svg, width, height) {
-    return new Promise(function (resolve, reject) {
-      var serializer = new XMLSerializer();
-      var svgStr = serializer.serializeToString(svg);
-      var blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-      var url = URL.createObjectURL(blob);
-      var img = new Image();
-      img.onload = function () {
-        var canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        var ctx = canvas.getContext("2d");
-        ctx.drawImage(img, 0, 0, width, height);
-        URL.revokeObjectURL(url);
-        try {
-          var dataUrl = canvas.toDataURL("image/png");
-          resolve(dataUrl);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.onerror = function (e) {
-        URL.revokeObjectURL(url);
-        reject(e);
-      };
-      img.src = url;
-    });
-  }
-
-  async function downloadPdf() {
-    if (!window.jspdf) {
-      if (renderStatus) renderStatus.textContent = "PDF-Export: jsPDF nicht geladen.";
-      return;
-    }
-    var svg = paper && paper.querySelector("svg");
-    if (!svg) {
-      if (renderStatus) renderStatus.textContent = "PDF-Export: Kein Notenblatt gefunden.";
-      return;
-    }
-    var { jsPDF } = window.jspdf;
-    var doc = new jsPDF({ unit: "pt", format: "a4" });
-    var dims = getSvgDims(svg);
-    var pageW = doc.internal.pageSize.getWidth();
-    var pageH = doc.internal.pageSize.getHeight();
-    var margin = 24;
-    var scale = Math.min((pageW - margin * 2) / dims.w, (pageH - margin * 2) / dims.h);
-    var x = margin;
-    var y = margin;
-
-    var svg2pdfFn = null;
-    try {
-      svg2pdfFn = await ensureSvg2pdf();
-    } catch (e) {
-      svg2pdfFn = null;
-    }
-
-    try {
-      if (svg2pdfFn) {
-        var clone = svg.cloneNode(true);
-        var res = svg2pdfFn(clone, doc, {
-          x: x,
-          y: y,
-          width: dims.w * scale,
-          height: dims.h * scale
-        });
-        if (res && typeof res.then === "function") await res;
-      } else {
-        var dataUrl = await svgToPngDataUrl(svg, dims.w, dims.h);
-        doc.addImage(dataUrl, "PNG", x, y, dims.w * scale, dims.h * scale);
-      }
-      doc.save("claritrans.pdf");
-      if (renderStatus) renderStatus.textContent = "PDF gespeichert.";
-    } catch (err) {
-      if (renderStatus) renderStatus.textContent = "PDF-Export fehlgeschlagen.";
-      // eslint-disable-next-line no-console
-      console.error("PDF export failed", err);
-    }
-  }
-
-  // Entferne den Produkt-Titel im Browser-Druckkopf: beim Drucken leerer Titel, danach zurücksetzen.
-  (function installPrintTitleHack() {
-    var originalTitle = document.title;
-    function clearTitle() {
-      document.title = " ";
-    }
-    function restoreTitle() {
-      document.title = originalTitle;
-    }
-    window.addEventListener("beforeprint", clearTitle);
-    window.addEventListener("afterprint", restoreTitle);
-  })();
-
-  // Init
-  var settingsLoaded = loadSettingsFromStorage();
-  buildPitchUI();
+  buildPitchUI(pitchButtonsSticky || pitchButtons);
+  setDockOpen(false);
   sync();
-  if (!settingsLoaded && shouldRunSetup()) {
-    startGuidedSetup();
-  }
 })();
